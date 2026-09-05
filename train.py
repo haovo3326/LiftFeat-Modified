@@ -18,7 +18,7 @@ def parse_arguments():
     parser.add_argument('--megadepth_root_path', type=str,
                         default=r'E:\LiftFeat\dataset\MegaDepth\phoenix\S6\zl548',
                         help='Path to the MegaDepth dataset root directory.')
-    parser.add_argument('--megadepth_batch_size', type=int, default=1)
+    parser.add_argument('--megadepth_batch_size', type=int, default=4)
     
     # COCO20k dataset setting
     parser.add_argument('--use_coco',action='store_true')
@@ -31,7 +31,7 @@ def parse_arguments():
                         help='Path to save the checkpoints.')
     parser.add_argument('--n_steps', type=int, default=80_000,
                         help='Number of training steps. Default is 80000.')
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=5e-5,
                         help='Learning rate. Default is 0.0001.')
     parser.add_argument('--gamma_steplr', type=float, default=0.7,
                         help='Gamma value for StepLR scheduler. Default is 0.7.')
@@ -100,7 +100,7 @@ class Trainer():
             print(f'GPU: {torch.cuda.get_device_name(0)}')
 
         # training model
-        self.net = LiftFeatSPModel(featureboost_config, use_kenc=False, use_normal=True, use_cross=True).to(self.dev)
+        self.net = LiftFeatSPModel(featureboost_config).to(self.dev)
         self.loss_fn=LiftFeatLoss(self.dev,lam_descs=1,lam_kpts=2,lam_heatmap=1)
         
         # depth-anything model
@@ -250,8 +250,8 @@ class Trainer():
                     coordinate=self.net.fine_matcher(torch.cat([feat1,feat2],dim=-1))
                     coordinates.append(coordinate)
                     
-                    fb_feat1=self.net.forward2(feats1[b].unsqueeze(0),kpts1[b].unsqueeze(0),normals1[b].unsqueeze(0))
-                    fb_feat2=self.net.forward2(feats2[b].unsqueeze(0),kpts2[b].unsqueeze(0),normals2[b].unsqueeze(0))
+                    fb_feat1=self.net.forward2(feats1[b].unsqueeze(0),normals1[b].unsqueeze(0))
+                    fb_feat2=self.net.forward2(feats2[b].unsqueeze(0),normals2[b].unsqueeze(0))
                     
                     fb_coordinate=self.net.fine_matcher(torch.cat([fb_feat1,fb_feat2],dim=-1))
                     fb_coordinates.append(fb_coordinate)
