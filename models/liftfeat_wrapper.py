@@ -114,7 +114,7 @@ class LiftFeat(nn.Module):
         B, _, _H1, _W1 = image.shape
 
         M1, K1, D1 = self.net.forward1(image)
-        refine_M = self.net.forward2(M1, K1, D1)
+        refine_M = self.net.forward2(M1, D1)
 
         refine_M = refine_M.reshape(M1.shape[0], M1.shape[2], M1.shape[3], -1).permute(0, 3, 1, 2)
         refine_M = torch.nn.functional.normalize(refine_M, 2, dim=1)

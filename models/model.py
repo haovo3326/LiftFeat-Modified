@@ -263,7 +263,7 @@ class LiftFeatSPModel(nn.Module):
         "legacy_sampling": True,  # True to use the old broken sampling
     }
 
-    def __init__(self, featureboost_config, use_kenc=False, use_normal=True, use_cross=True):
+    def __init__(self, featureboost_config):
         super().__init__()
         self.device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.descriptor_dim = 64
@@ -313,10 +313,10 @@ class LiftFeatSPModel(nn.Module):
                                             nn.BatchNorm1d(512, affine=False),
                                             nn.ReLU(inplace = True),
                                             nn.Linear(512, 64),
-                                        )
+        )
         
         # feature_booster
-        self.feature_boost = FeatureBooster(featureboost_config, use_kenc=use_kenc, use_cross=use_cross, use_normal=use_normal)
+        self.feature_boost = FeatureBooster(featureboost_config)
         
     def feature_extract(self, x):
         x1 = self.relu(self.conv1a(x))
@@ -390,18 +390,16 @@ class LiftFeatSPModel(nn.Module):
         return des_map, keypoint_map, d_feats
         # return des_map, keypoint_map, heatmap, d_feats
     
-    def forward2(self, descs, kpts, normals):
-        # import pdb;pdb.set_trace()
+    def forward2(self, descs, normals):
         normals_feat=self._unfold2d(normals, ws=8)
         normals_v=normals_feat.squeeze(0).permute(1,2,0).reshape(-1,normals_feat.shape[1])
         descs_v=descs.squeeze(0).permute(1,2,0).reshape(-1,descs.shape[1])
-        kpts_v=kpts.squeeze(0).permute(1,2,0).reshape(-1,kpts.shape[1])
-        descs_refine = self.feature_boost(descs_v, kpts_v, normals_v)
+        descs_refine = self.feature_boost(descs_v, normals_v)
         return descs_refine
     
     def forward(self,x):
         M1,K1,D1=self.forward1(x)
-        descs_refine=self.forward2(M1,K1,D1)
+        descs_refine=self.forward2(M1,D1)
         return descs_refine,M1,K1,D1
     
 
@@ -414,6 +412,6 @@ if __name__ == "__main__":
     img=img.cuda() if torch.cuda.is_available() else img
     liftfeat_sp=LiftFeatSPModel(featureboost_config).to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     des_map, keypoint_map, d_feats=liftfeat_sp.forward1(img)
-    des_fine=liftfeat_sp.forward2(des_map,keypoint_map,d_feats)
+    des_fine=liftfeat_sp.forward2(des_map,d_feats)
     print(des_map.shape)
     

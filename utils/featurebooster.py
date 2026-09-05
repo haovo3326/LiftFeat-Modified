@@ -17,128 +17,60 @@ def MLP(channels: List[int], do_bn: bool = False) -> nn.Module:
             layers.append(nn.ReLU())
     return nn.Sequential(*layers)
 
-def MLP_no_ReLU(channels: List[int], do_bn: bool = False) -> nn.Module:
-    """ Multi-layer perceptron """
-    n = len(channels)
-    layers = []
-    for i in range(1, n):
-        layers.append(nn.Linear(channels[i - 1], channels[i]))
-        if i < (n-1):
-            if do_bn:
-                layers.append(nn.BatchNorm1d(channels[i]))
-    return nn.Sequential(*layers)
-
-
-class KeypointEncoder(nn.Module):
-    """ Encoding of geometric properties using MLP """
-    def __init__(self, keypoint_dim: int, feature_dim: int, layers: List[int], dropout: bool = False, p: float = 0.1) -> None:
-        super().__init__()
-        self.encoder = MLP([keypoint_dim] + layers + [feature_dim])
-        self.use_dropout = dropout
-        self.dropout = nn.Dropout(p=p)
-
-    def forward(self, kpts):
-        if self.use_dropout:
-            return self.dropout(self.encoder(kpts))
-        return self.encoder(kpts)
-
-class NormalEncoder(nn.Module):
-    """ Encoding of geometric properties using MLP """
-    def __init__(self, normal_dim: int, feature_dim: int, layers: List[int], dropout: bool = False, p: float = 0.1) -> None:
-        super().__init__()
-        self.encoder = MLP_no_ReLU([normal_dim] + layers + [feature_dim])
-        self.use_dropout = dropout
-        self.dropout = nn.Dropout(p=p)
-
-    def forward(self, kpts):
-        if self.use_dropout:
-            return self.dropout(self.encoder(kpts))
-        return self.encoder(kpts)
-
-
-class DescriptorEncoder(nn.Module):
-    """ Encoding of visual descriptor using MLP """
-    def __init__(self, feature_dim: int, layers: List[int], dropout: bool = False, p: float = 0.1) -> None:
-        super().__init__()
-        self.encoder = MLP([feature_dim] + layers + [feature_dim])
-        self.use_dropout = dropout
-        self.dropout = nn.Dropout(p=p)
-    
-    def forward(self, descs):
-        residual = descs
-        if self.use_dropout:
-            return residual + self.dropout(self.encoder(descs))
-        return residual + self.encoder(descs)
-
-
 class AFTAttention(nn.Module):
     """ Attention-free attention """
-    def __init__(self, d_model: int, dropout: bool = False, p: float = 0.1) -> None:
+    def __init__(self, d_model: int) -> None:
         super().__init__()
         self.dim = d_model
         self.query = nn.Linear(d_model, d_model)
         self.key = nn.Linear(d_model, d_model)
         self.value = nn.Linear(d_model, d_model)
         self.proj = nn.Linear(d_model, d_model)
-        # self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
-        self.use_dropout = dropout
-        self.dropout = nn.Dropout(p=p)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
-        # q = torch.sigmoid(q)
         k = k.T
         k = torch.softmax(k, dim=-1)
         k = k.T
         kv = (k * v).sum(dim=-2, keepdim=True)
         x = q * kv
         x = self.proj(x)
-        if self.use_dropout:
-            x = self.dropout(x)
         x += residual
-        # x = self.layer_norm(x)
         return x
 
 
 class PositionwiseFeedForward(nn.Module):
-    def __init__(self, feature_dim: int, dropout: bool = False, p: float = 0.1) -> None:
+    def __init__(self, feature_dim: int) -> None:
         super().__init__()
         self.mlp = MLP([feature_dim, feature_dim*2, feature_dim])
-        # self.layer_norm = nn.LayerNorm(feature_dim, eps=1e-6)
-        self.use_dropout = dropout
-        self.dropout = nn.Dropout(p=p)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
         x = self.mlp(x)
-        if self.use_dropout:
-            x = self.dropout(x)
         x += residual
-        # x = self.layer_norm(x)
         return x
 
 
 class AttentionalLayer(nn.Module):
-    def __init__(self, feature_dim: int, dropout: bool = False, p: float = 0.1):
+    def __init__(self, feature_dim: int):
         super().__init__()
-        self.attn = AFTAttention(feature_dim, dropout=dropout, p=p)
-        self.ffn = PositionwiseFeedForward(feature_dim, dropout=dropout, p=p)
+        self.attn = AFTAttention(feature_dim)
+        self.ffn = PositionwiseFeedForward(feature_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # import pdb;pdb.set_trace()
         x = self.attn(x)
         x = self.ffn(x)
         return x
 
 
 class AttentionalNN(nn.Module):
-    def __init__(self, feature_dim: int, layer_num: int, dropout: bool = False, p: float = 0.1) -> None:
+    def __init__(self, feature_dim: int, layer_num: int) -> None:
         super().__init__()
         self.layers = nn.ModuleList([
-            AttentionalLayer(feature_dim, dropout=dropout, p=p)
+            AttentionalLayer(feature_dim)
             for _ in range(layer_num)])
 
     def forward(self, desc: torch.Tensor) -> torch.Tensor:
@@ -146,69 +78,56 @@ class AttentionalNN(nn.Module):
             desc = layer(desc)
         return desc
 
+class PointwiseProjection(nn.Module):
+    def __init__(self, input_dim: int, output_dim: int):
+        super().__init__()
+        self.proj = nn.Conv1d(input_dim, output_dim, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Pointwise 1x1 projection for token features shaped as (N, C).
+        x = x.t().unsqueeze(0)
+        x = self.proj(x)
+        return x.squeeze(0).t()
+
 class FeatureProjection(nn.Module):
     """
-    Project from 64 + 3 * 64 dimensional features to 64 dimensional features
-    Used after Attentional Layer
+    Project the 64-dimensional attended GFL feature back to descriptor space.
     """
-    def __init__(self, input_dim: int, output_dim: int, layers: List[int], dropout: bool = False, p: float = 0.1):
+    def __init__(self, input_dim: int, output_dim: int, layers: List[int]):
         super().__init__()
         self.mlp = MLP([input_dim] + layers + [output_dim])
-        self.use_dropout = dropout
-        self.dropout = nn.Dropout(p=p)
 
     def forward(self, x):
-        if self.use_dropout:
-            return self.dropout(self.mlp(x))
         return self.mlp(x)
 
 
 class FeatureBooster(nn.Module):
     default_config = {
         'descriptor_dim': 128,
-        'keypoint_encoder': [32, 64, 128],
+        'normal_dim': 192,
+        'feature_projection': [128, 64, 64],
         'Attentional_layers': 3,
         'last_activation': 'relu',
         'l2_normalization': True,
-        'output_dim': 128
     }
 
-    def __init__(self, config, dropout=False, p=0.1, use_kenc=True, use_normal=True, use_cross=True):
+    def __init__(self, config):
         super().__init__()
         self.config = {**self.default_config, **config}
-        self.use_kenc = use_kenc
-        self.use_cross = use_cross
-        self.use_normal = use_normal
 
-        if use_kenc:
-            self.kenc = KeypointEncoder(self.config['keypoint_dim'], self.config['descriptor_dim'], self.config['keypoint_encoder'], dropout=dropout)
-
-        if use_normal:
-            self.nenc = NormalEncoder(self.config['normal_dim'], self.config['descriptor_dim'], self.config['normal_encoder'], dropout=dropout)
-
-        if self.config.get('descriptor_encoder', False):
-            self.denc = DescriptorEncoder(self.config['descriptor_dim'], self.config['descriptor_encoder'], dropout=dropout)
-        else:
-            self.denc = None
+        branch_dim = self.config['descriptor_dim'] // 2
+        self.desc_proj = PointwiseProjection(self.config['descriptor_dim'], branch_dim)
+        self.normal_proj = PointwiseProjection(self.config['normal_dim'], branch_dim)
 
         self.attention_dim = self.config['descriptor_dim']
-        if self.use_normal:
-            self.attention_dim += self.config['normal_dim']
 
-        if self.use_cross:
-            self.attn_proj = AttentionalNN(feature_dim=self.attention_dim, layer_num=self.config['Attentional_layers'], dropout=dropout)
+        self.attn_proj = AttentionalNN(feature_dim=self.attention_dim, layer_num=self.config['Attentional_layers'])
 
-        # self.final_proj = nn.Linear(self.config['descriptor_dim'], self.config['output_dim'])
         self.feat_project = FeatureProjection(
             input_dim=self.attention_dim,
             output_dim=self.config['descriptor_dim'],
             layers = self.config['feature_projection'],
-            dropout=dropout
         )
-        self.use_dropout = dropout
-        self.dropout = nn.Dropout(p=p)
-
-        # self.layer_norm = nn.LayerNorm(self.config['descriptor_dim'], eps=1e-6)
 
         if self.config.get('last_activation', False):
             if self.config['last_activation'].lower() == 'relu':
@@ -222,24 +141,20 @@ class FeatureBooster(nn.Module):
         else:
             self.last_activation = None
 
-    def forward(self, desc, kpts, normals):
-        # import pdb;pdb.set_trace()
-        ## Self boosting
-        # Descriptor MLP encoder
+    def forward(self, desc, normals):
+        # 1x1 projections: descriptor 64->32, normal patch 192->32.
+        desc = self.desc_proj(desc)
+        normals = self.normal_proj(normals)
+        desc = torch.cat([desc, normals], dim=-1)
 
-        # 法向量特征 encoder
-        if self.use_normal:
-            desc = torch.cat([desc, normals], dim=-1)
+        # Concat output is the residual branch for the final lifted descriptor.
+        residual = desc
         
-        ## Cross boosting
-        # Multi-layer Transformer network.
-        if self.use_cross:
-            # desc = self.attn_proj(self.layer_norm(desc))
-            desc = self.attn_proj(desc)
+        desc = self.attn_proj(desc)
 
-        ## Post processing
-        # Final MLP projection
+        # Attention + MLP projection, then residual addition.
         desc = self.feat_project(desc)
+        desc = desc + residual
         if self.last_activation is not None:
             desc = self.last_activation(desc)
         # L2 normalization
@@ -249,15 +164,14 @@ class FeatureBooster(nn.Module):
         return desc
 
 if __name__ == "__main__":
-    from config import t1_featureboost_config
-    fb_net = FeatureBooster(t1_featureboost_config)
+    from config import featureboost_config
+    fb_net = FeatureBooster(featureboost_config)
 
     descs=torch.randn([1900,64])
-    kpts=torch.randn([1900,65])
-    normals=torch.randn([1900,3])
+    normals=torch.randn([1900,192])
 
     import pdb;pdb.set_trace()
 
-    descs_refine=fb_net(descs,kpts,normals)
+    descs_refine=fb_net(descs,normals)
 
     print(descs_refine.shape)
