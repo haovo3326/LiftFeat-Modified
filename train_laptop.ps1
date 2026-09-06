@@ -6,10 +6,10 @@ Set-Location $PSScriptRoot
   --name LiftFeat_MD_laptop `
   --use_megadepth `
   --megadepth_root_path "E:\LiftFeat\dataset\MegaDepth\phoenix\S6\zl548" `
-  --megadepth_batch_size 1 `
+  --megadepth_batch_size 2 `
   --ckpt_save_path "E:\LiftFeat\trained_weights\megadepth_laptop" `
-  --n_steps 80000 `
-  --lr 1e-4 `
+  --n_steps 40000 `
+  --lr 5e-5 `
   --gamma_steplr 0.7 `
   --device_num 0 `
   --save_ckpt_every 2000
