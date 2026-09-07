@@ -80,7 +80,8 @@ class MegaDepth1500(Dataset):
         return data
 
 if __name__ == "__main__":
-    weights=os.path.join(os.path.dirname(__file__),'../trained_weights/megadepth_laptop/LiftFeat_40000.pth')
+    weights=os.path.join(os.path.dirname(__file__),
+                         '../checkpoints_for_3D_GFL_changes/megadepth_laptop/LiftFeat_40000.pth')
     liftfeat=LiftFeat(weight=weights)
 
     dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
