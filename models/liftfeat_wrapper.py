@@ -67,7 +67,7 @@ def load_model(model, weight_path):
         print("load weight successfully.")
     else:
         model.load_state_dict(pretrained_weights, strict=False)
-        # print("There were issues with the keys.")
+        print("There were issues with the keys.")
     return model
 
 

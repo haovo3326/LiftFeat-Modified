@@ -1,7 +1,7 @@
 import torch
 from pathlib import Path
 
-DEFAULT_SKIP_PREFIXES = ("feature_boost.", "depth_head.", "normal_head.")
+DEFAULT_SKIP_PREFIXES = ("feature_boost.",)
 
 
 def _load_pretrained_weights(weight_filepath):

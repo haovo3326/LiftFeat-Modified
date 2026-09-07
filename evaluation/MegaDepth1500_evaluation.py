@@ -80,18 +80,16 @@ class MegaDepth1500(Dataset):
         return data
 
 if __name__ == "__main__":
-    weights=os.path.join(os.path.dirname(__file__),'../weights/LiftFeat.pth')
+    weights=os.path.join(os.path.dirname(__file__),'../trained_weights/megadepth_laptop/LiftFeat_40000.pth')
     liftfeat=LiftFeat(weight=weights)
-    
-    dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
 
+    dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
     metrics = {}
     R_errs = []
     t_errs = []
     inliers = []
-    
     results=[]
 
     cur_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -99,7 +97,7 @@ if __name__ == "__main__":
     for d in tqdm.tqdm(loader, desc="processing"):
         error_infos = compute_pose_error(liftfeat.match_liftfeat,d)
         results.append(error_infos)
-            
+
     print(f'\n==={cur_time}==={args.name}===')
     d_err_auc, errors=compute_maa(results)
 
