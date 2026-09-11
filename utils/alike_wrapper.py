@@ -5,10 +5,12 @@
 
 import sys
 import os
+from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).absolute().parents[1]
 ALIKE_PATH = os.path.abspath(os.environ.get(
     'ALIKE_PATH',
-    os.path.join(os.path.dirname(__file__), '..', 'third_repos', 'ALIKE')
+    str(PROJECT_ROOT / 'third_repos' / 'ALIKE')
 ))
 if ALIKE_PATH not in sys.path:
     sys.path.insert(0, ALIKE_PATH)

@@ -9,10 +9,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.transforms import Compose
 import sys
+from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).absolute().parents[1]
 DEPTH_ANYTHING_PATH = os.path.abspath(os.environ.get(
     'DEPTH_ANYTHING_PATH',
-    os.path.join(os.path.dirname(__file__), '..', 'third_repos', 'Depth-Anything-V2')
+    str(PROJECT_ROOT / 'third_repos' / 'Depth-Anything-V2')
 ))
 if DEPTH_ANYTHING_PATH not in sys.path:
     sys.path.insert(0, DEPTH_ANYTHING_PATH)
