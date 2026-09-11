@@ -23,13 +23,13 @@ import pdb, tqdm, os
 
 class MegaDepthDataset(Dataset):
     def __init__(self,
-                 root_dir,
+                 root_dirs,
                  npz_path,
                  mode='train',
-                 min_overlap_score = 0.3, #0.3,
-                 max_overlap_score = 1.0, #1,
+                 min_overlap_score = 0.3,  #0.3,
+                 max_overlap_score = 1.0,  #1,
                  load_depth = True,
-                 img_resize = (800,608), #or None
+                 img_resize = (800,608),  #or None
                  df=32,
                  img_padding=False,
                  depth_padding=True,
@@ -39,7 +39,7 @@ class MegaDepthDataset(Dataset):
         Manage one scene(npz_path) of MegaDepth dataset.
         
         Args:
-            root_dir (str): megadepth root directory that has `phoenix`.
+            root_dirs (str): megadepth root directory that has `phoenix`.
             npz_path (str): {scene_id}.npz path. This contains image pair information of a scene.
             mode (str): options are ['train', 'val', 'test']
             min_overlap_score (float): how much a pair should have in common. In range of [0, 1]. Set to 0 when testing.
@@ -51,7 +51,7 @@ class MegaDepthDataset(Dataset):
             augment_fn (callable, optional): augments images with pre-defined visual effects.
         """
         super().__init__()
-        self.root_dir = root_dir
+        self.root_dirs = [root_dirs] if isinstance(root_dirs, str) else root_dirs
         self.mode = mode
         self.scene_id = npz_path.split('.')[0]
         self.load_depth = load_depth
@@ -86,12 +86,19 @@ class MegaDepthDataset(Dataset):
     def __len__(self):
         return len(self.pair_infos)
 
+    def _resolve_path(self, path):
+        for root_dir in self.root_dirs:
+            candidate = osp.join(root_dir, path)
+            if osp.exists(candidate):
+                return candidate
+        raise FileNotFoundError(f'Could not find MegaDepth file in any root: {path}')
+
     def __getitem__(self, idx):
         (idx0, idx1), overlap_score, central_matches = self.pair_infos[idx % len(self)]
 
         # read grayscale image and mask. (1, h, w) and (h, w)
-        img_name0 = osp.join(self.root_dir, self.scene_info['image_paths'][idx0])
-        img_name1 = osp.join(self.root_dir, self.scene_info['image_paths'][idx1])
+        img_name0 = self._resolve_path(self.scene_info['image_paths'][idx0])
+        img_name1 = self._resolve_path(self.scene_info['image_paths'][idx1])
         
         # TODO: Support augmentation & handle seeds for each worker correctly.
         image0, image0_t, mask0, scale0 = read_megadepth_gray(img_name0, self.img_resize, self.df, self.img_padding, None)
@@ -103,9 +110,9 @@ class MegaDepthDataset(Dataset):
             # read depth. shape: (h, w)
             if self.mode in ['train', 'val']:
                 depth0 = read_megadepth_depth(
-                    osp.join(self.root_dir, self.scene_info['depth_paths'][idx0]), pad_to=self.depth_max_size)
+                    self._resolve_path(self.scene_info['depth_paths'][idx0]), pad_to=self.depth_max_size)
                 depth1 = read_megadepth_depth(
-                    osp.join(self.root_dir, self.scene_info['depth_paths'][idx1]), pad_to=self.depth_max_size)
+                    self._resolve_path(self.scene_info['depth_paths'][idx1]), pad_to=self.depth_max_size)
             else:
                 depth0 = depth1 = torch.tensor([])
 
