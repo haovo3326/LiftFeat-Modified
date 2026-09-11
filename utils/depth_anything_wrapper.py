@@ -10,7 +10,10 @@ import torch.nn.functional as F
 from torchvision.transforms import Compose
 import sys
 
-DEPTH_ANYTHING_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'third_repos', 'Depth-Anything-V2'))
+DEPTH_ANYTHING_PATH = os.path.abspath(os.environ.get(
+    'DEPTH_ANYTHING_PATH',
+    os.path.join(os.path.dirname(__file__), '..', 'third_repos', 'Depth-Anything-V2')
+))
 if DEPTH_ANYTHING_PATH not in sys.path:
     sys.path.insert(0, DEPTH_ANYTHING_PATH)
 from depth_anything_v2.dpt import DepthAnythingV2
@@ -18,9 +21,18 @@ from depth_anything_v2.util.transform import Resize, NormalizeImage, PrepareForN
 
 import time
 
-VITS_MODEL_PATH = os.path.join(DEPTH_ANYTHING_PATH, "checkpoints", "depth_anything_v2_vits.pth")
-VITB_MODEL_PATH = os.path.join(DEPTH_ANYTHING_PATH, "checkpoints", "depth_anything_v2_vitb.pth")
-VITL_MODEL_PATH = os.path.join(DEPTH_ANYTHING_PATH, "checkpoints", "depth_anything_v2_vitl.pth")
+VITS_MODEL_PATH = os.environ.get(
+    "DEPTH_ANYTHING_VITS_PATH",
+    os.path.join(DEPTH_ANYTHING_PATH, "checkpoints", "depth_anything_v2_vits.pth")
+)
+VITB_MODEL_PATH = os.environ.get(
+    "DEPTH_ANYTHING_VITB_PATH",
+    os.path.join(DEPTH_ANYTHING_PATH, "checkpoints", "depth_anything_v2_vitb.pth")
+)
+VITL_MODEL_PATH = os.environ.get(
+    "DEPTH_ANYTHING_VITL_PATH",
+    os.path.join(DEPTH_ANYTHING_PATH, "checkpoints", "depth_anything_v2_vitl.pth")
+)
 
 model_configs = {
         "vits": {"encoder": "vits", "features": 64, "out_channels": [48, 96, 192, 384]},
