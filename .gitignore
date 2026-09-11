@@ -1,5 +1,6 @@
 visualize
 trained_weights
+checkpoints_for_3D_GFL_changes
 data/HPatch
 data/megadepth_test_1500
 dataset/MegaDepth/
