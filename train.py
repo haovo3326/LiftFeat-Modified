@@ -16,7 +16,7 @@ def parse_arguments():
     # MegaDepth dataset setting
     parser.add_argument('--use_megadepth',action='store_true')
     parser.add_argument('--megadepth_root_path', type=str,
-                        default=r'E:\LiftFeat\dataset\MegaDepth\phoenix\S6\zl548',
+                        default='/kaggle/input/datasets',
                         help='Path to the MegaDepth dataset root directory.')
     parser.add_argument('--megadepth_batch_size', type=int, default=4)
     
@@ -27,7 +27,7 @@ def parse_arguments():
     parser.add_argument('--coco_batch_size',type=int,default=4)
 
     parser.add_argument('--ckpt_save_path', type=str,
-                        default=r'E:\LiftFeat\trained_weights\megadepth_laptop',
+                        default='/kaggle/working/trained_weights/megadepth',
                         help='Path to save the checkpoints.')
     parser.add_argument('--n_steps', type=int, default=80_000,
                         help='Number of training steps. Default is 80000.')
@@ -138,16 +138,21 @@ class Trainer():
         self.use_megadepth=use_megadepth
         self.megadepth_batch_size=megadepth_batch_size
         if self.use_megadepth:
-            TRAIN_BASE_PATH = f"{megadepth_root_path}/train_data/megadepth_indices"
-            TRAINVAL_DATA_SOURCE = f"{megadepth_root_path}/MegaDepth_v1"
+            TRAIN_BASE_PATH = f"{megadepth_root_path}/haovo3326/megadepth-metadata/train_data/megadepth_indices"
+            TRAINVAL_DATA_SOURCE = [
+                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p1/MegaDepth_v1_p1",
+                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p2/MegaDepth_v1_p2",
+                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p3/MegaDepth_v1_p3",
+                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p4/MegaDepth_v1_p4"
+            ]
 
             TRAIN_NPZ_ROOT = f"{TRAIN_BASE_PATH}/scene_info_0.1_0.7"
 
             npz_paths = glob.glob(TRAIN_NPZ_ROOT + '/*.npz')[:]
             if len(npz_paths) == 0:
                 raise RuntimeError(f'No MegaDepth index files found in {TRAIN_NPZ_ROOT}')
-            megadepth_dataset = torch.utils.data.ConcatDataset( [MegaDepthDataset(root_dir = TRAINVAL_DATA_SOURCE,
-                            npz_path = path) for path in tqdm.tqdm(npz_paths, desc="[MegaDepth] Loading metadata")] )
+            megadepth_dataset = torch.utils.data.ConcatDataset( [MegaDepthDataset(root_dirs= TRAINVAL_DATA_SOURCE,
+                                                                                  npz_path = path) for path in tqdm.tqdm(npz_paths, desc="[MegaDepth] Loading metadata")] )
 
             self.megadepth_dataloader = DataLoader(megadepth_dataset, batch_size=megadepth_batch_size, shuffle=True)
             self.megadepth_data_iter = iter(self.megadepth_dataloader)
