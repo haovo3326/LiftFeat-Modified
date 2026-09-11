@@ -77,7 +77,10 @@ from dataset import coco_wrapper
 from dataset.megadepth import MegaDepthDataset
 from dataset.coco_augmentor import COCOAugmentor
 
-import setproctitle
+try:
+    import setproctitle
+except ImportError:
+    setproctitle = None
 
 
 class Trainer():
@@ -376,7 +379,8 @@ loss_normals.item()) )
 
 if __name__ == '__main__':
     
-    setproctitle.setproctitle(args.name)
+    if setproctitle is not None:
+        setproctitle.setproctitle(args.name)
 
     trainer = Trainer(
         megadepth_root_path=args.megadepth_root_path, 
