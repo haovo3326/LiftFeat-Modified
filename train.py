@@ -171,11 +171,11 @@ class Trainer():
         self.model_name = model_name
         self.use_coord_loss = use_coord_loss
 
-        ##################### INHERIT PRETRAINED WEIGHT ###################
-        print("Loading pretrained model...")
-        self.net, _ = apply_weight(self.net, "weights/LiftFeat.pth")
-        print("Pretrained model loaded.")
-        ###################################################################
+        # ##################### INHERIT PRETRAINED WEIGHT ###################
+        # print("Loading pretrained model...")
+        # self.net, _ = apply_weight(self.net, "weights/LiftFeat.pth")
+        # print("Pretrained model loaded.")
+        # ###################################################################
         
     def generate_train_data(self):
         imgs1_t,imgs2_t=[],[]
@@ -353,12 +353,7 @@ loss_fb_descs.item(), acc_fb_coarse, \
 loss_fb_coordinates.item(), acc_fb_coordinates, \
 loss_kpts.item(), acc_kpt, \
 loss_normals.item()) )
-                if (i+1) % 10 == 0:
-                    print(
-                        'Step: {}/{} Loss: {:.4f} loss_fb_descs: {:.3f} loss_kpts: {:.3f} loss_normals: {:.3f}'.format(
-                            i+1, self.steps, loss.item(), loss_fb_descs.item(), loss_kpts.item(), loss_normals.item()
-                        )
-                    )
+
                 pbar.update(1)
 
                 # Log metrics
