@@ -142,19 +142,17 @@ class FeatureBooster(nn.Module):
             self.last_activation = None
 
     def forward(self, desc, normals):
-        # 1x1 projections: descriptor 64->32, normal patch 192->32.
-        desc = self.desc_proj(desc)
-        normals = self.normal_proj(normals)
-        desc = torch.cat([desc, normals], dim=-1)
+        desc = self.desc_proj(desc)                         # raw desc -> 1x1 Conv -> new desc
+        normals = self.normal_proj(normals)                 # raw normals -> 1x1 Conv -> new normals
+        desc = torch.cat([desc, normals], dim=-1)   # [desc: normals]
 
         # Concat output is the residual branch for the final lifted descriptor.
         residual = desc
         
-        desc = self.attn_proj(desc)
+        desc = self.attn_proj(desc)                         # multi-head attention
 
-        # Attention + MLP projection, then residual addition.
-        desc = self.feat_project(desc)
-        desc = desc + residual
+        desc = self.feat_project(desc)                      # mlp
+        desc = desc + residual                              # +residual
         if self.last_activation is not None:
             desc = self.last_activation(desc)
         # L2 normalization
