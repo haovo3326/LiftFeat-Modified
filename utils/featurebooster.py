@@ -141,18 +141,24 @@ class FeatureBooster(nn.Module):
         else:
             self.last_activation = None
 
+    """
+    Architectural Ablation Study
+    Variant         Fusion              Attention           MLP         Residual    
+    M1*             1x1 Conv + Concat   Single              No          No          
+    M2              1x1 Conv + Concat   Single              Yes         No
+    M3              1x1 Conv + Concat   Multi               Yes         No
+    M4              1x1 Conv + Concat   Multi               Yes         Yes     
+    """
     def forward(self, desc, normals):
         desc = self.desc_proj(desc)                         # raw desc -> 1x1 Conv -> new desc
         normals = self.normal_proj(normals)                 # raw normals -> 1x1 Conv -> new normals
         desc = torch.cat([desc, normals], dim=-1)   # [desc: normals]
 
-        # Concat output is the residual branch for the final lifted descriptor.
         residual = desc
-        
-        desc = self.attn_proj(desc)                         # multi-head attention
+        desc = self.attn_proj(desc)                         # multi-head/single-head attention
+        # desc = self.feat_project(desc)                      # mlp
+        # desc = desc + residual                              # +residual
 
-        desc = self.feat_project(desc)                      # mlp
-        desc = desc + residual                              # +residual
         if self.last_activation is not None:
             desc = self.last_activation(desc)
         # L2 normalization
