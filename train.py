@@ -172,9 +172,9 @@ class Trainer():
         self.use_coord_loss = use_coord_loss
 
         ##################### INHERIT PRETRAINED WEIGHT ###################
-        print("Loading pretrained model...")
-        self.net, _ = apply_weight(self.net, "weights/LiftFeat.pth")
-        print("Pretrained model loaded.")
+        # print("Loading pretrained model...")
+        # self.net, _ = apply_weight(self.net, "weights/LiftFeat.pth")
+        # print("Pretrained model loaded.")
         ###################################################################
         
     def generate_train_data(self):
