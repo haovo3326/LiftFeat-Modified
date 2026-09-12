@@ -143,7 +143,7 @@ class FeatureBooster(nn.Module):
 
     """
     Architectural Ablation Study
-    Variant         Fusion              Attention           MLP         Residual    
+    Variant         Fusion              Attention Head      MLP         Residual    
     M1*             1x1 Conv + Concat   Single              No          No          
     M2              1x1 Conv + Concat   Single              Yes         No
     M3              1x1 Conv + Concat   Multi               Yes         No
