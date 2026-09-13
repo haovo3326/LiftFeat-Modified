@@ -7,7 +7,7 @@ import time
 
 
 def dual_softmax_loss(X, Y, temp = 0.2):
-    if X.size() != Y.size() or X.dim() != 2 or Y.dim() != 2:
+    if X.size() != Y.size() or X.d_model() != 2 or Y.d_model() != 2:
         raise RuntimeError('Error: X and Y shapes must match and be 2D matrices')
 
     dist_mat = (X @ Y.t()) * temp
