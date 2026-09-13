@@ -19,9 +19,11 @@ def MLP(channels: List[int], do_bn: bool = False) -> nn.Module:
 
 class AFTAttention(nn.Module):
     """ Attention-free attention """
-    def __init__(self, d_model: int) -> None:
+    def __init__(self, d_model: int, n_heads) -> None:
         super().__init__()
-        self.dim = d_model
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
         self.query = nn.Linear(d_model, d_model)
         self.key = nn.Linear(d_model, d_model)
         self.value = nn.Linear(d_model, d_model)
@@ -29,16 +31,44 @@ class AFTAttention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
+
+        N, D = x.shape
+
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
-        k = k.T
-        k = torch.softmax(k, dim=-1)
-        k = k.T
+
+        # [N, D] -> [N, H, d_k]
+        q = q.view(N, self.n_heads, self.d_k)
+        k = k.view(N, self.n_heads, self.d_k)
+        v = v.view(N, self.n_heads, self.d_k)
+
+        # [N, H, d_k] -> [H, N, d_k]
+        q = q.transpose(0, 1)
+        k = k.transpose(0, 1)
+        v = v.transpose(0, 1)
+
+        # normalize keys over tokens
+        k = torch.softmax(k, dim=-2)
+
+        # [H, N, d_k] -> [H, 1, d_k]
         kv = (k * v).sum(dim=-2, keepdim=True)
+
+        # [H, N, d_k]
         x = q * kv
+
+        # concatenate heads
+        # [H, N, d_k] -> [N, H, d_k]
+        x = x.transpose(0, 1)
+
+        # [N, H, d_k] -> [N, D]
+        x = x.reshape(N, D)
+
         x = self.proj(x)
-        x += residual
+
+        # residual
+        x = x + residual
+
         return x
 
 
@@ -55,9 +85,9 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class AttentionalLayer(nn.Module):
-    def __init__(self, feature_dim: int):
+    def __init__(self, feature_dim: int, num_heads: int):
         super().__init__()
-        self.attn = AFTAttention(feature_dim)
+        self.attn = AFTAttention(feature_dim, num_heads)
         self.ffn = PositionwiseFeedForward(feature_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -67,10 +97,10 @@ class AttentionalLayer(nn.Module):
 
 
 class AttentionalNN(nn.Module):
-    def __init__(self, feature_dim: int, layer_num: int) -> None:
+    def __init__(self, feature_dim: int, num_heads, layer_num: int) -> None:
         super().__init__()
         self.layers = nn.ModuleList([
-            AttentionalLayer(feature_dim)
+            AttentionalLayer(feature_dim, num_heads)
             for _ in range(layer_num)])
 
     def forward(self, desc: torch.Tensor) -> torch.Tensor:
@@ -115,18 +145,22 @@ class FeatureBooster(nn.Module):
         super().__init__()
         self.config = {**self.default_config, **config}
 
-        branch_dim = self.config['descriptor_dim'] // 2
-        self.desc_proj = PointwiseProjection(self.config['descriptor_dim'], branch_dim)
-        self.normal_proj = PointwiseProjection(self.config['normal_dim'], branch_dim)
+        self.desc_proj = PointwiseProjection(self.config['descriptor_dim'], self.config['descriptor_dim'])
+        self.normal_proj = PointwiseProjection(self.config['normal_dim'], self.config['descriptor_dim'])
+
+
+        self.feat_project = FeatureProjection(
+            input_dim=self.config['descriptor_dim'] * 2,
+            output_dim=self.config['descriptor_dim'],
+            layers=self.config['feature_projection'],
+        )
 
         self.attention_dim = self.config['descriptor_dim']
 
-        self.attn_proj = AttentionalNN(feature_dim=self.attention_dim, layer_num=self.config['Attentional_layers'])
-
-        self.feat_project = FeatureProjection(
-            input_dim=self.attention_dim,
-            output_dim=self.config['descriptor_dim'],
-            layers = self.config['feature_projection'],
+        self.attn_proj = AttentionalNN(
+            feature_dim=self.attention_dim,
+            num_heads= self.config['num_heads'],
+            layer_num=self.config['Attentional_layers']
         )
 
         if self.config.get('last_activation', False):
@@ -143,21 +177,20 @@ class FeatureBooster(nn.Module):
 
     """
     Architectural Ablation Study
-    Variant         Fusion              Attention Head      MLP         Residual    
-    M1*             1x1 Conv + Concat   Single              No          No          
-    M2              1x1 Conv + Concat   Single              Yes         No
-    M3              1x1 Conv + Concat   Multi               Yes         No
-    M4              1x1 Conv + Concat   Multi               Yes         Yes     
+    Variant         Fusion                      Attention Head      Residual    
+    M1*             1x1 Conv + Concat + MLP     Single              No          
+    M2              1x1 Conv + Concat + MLP     Single              No
+    M3              1x1 Conv + Concat + MLP     Multi               No
+    M4              1x1 Conv + Concat + MLP     Multi               Yes     
     """
     def forward(self, desc, normals):
+        residual = desc
         desc = self.desc_proj(desc)                         # raw desc -> 1x1 Conv -> new desc
         normals = self.normal_proj(normals)                 # raw normals -> 1x1 Conv -> new normals
-        desc = torch.cat([desc, normals], dim=-1)   # [desc: normals]
-
-        residual = desc
-        desc = self.attn_proj(desc)                         # multi-head/single-head attention
-        # desc = self.feat_project(desc)                      # mlp
-        # desc = desc + residual                              # +residual
+        desc = torch.cat([desc, normals], dim = -1) # Concatenation: [desc: normals]
+        desc = self.feat_project(desc)                      # MLP projection
+        desc = self.attn_proj(desc)                         # Multi-head/Single-head attention
+        desc = desc + residual
 
         if self.last_activation is not None:
             desc = self.last_activation(desc)
