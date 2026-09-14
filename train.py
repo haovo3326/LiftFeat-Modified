@@ -77,10 +77,8 @@ from dataset import coco_wrapper
 from dataset.megadepth import MegaDepthDataset
 from dataset.coco_augmentor import COCOAugmentor
 
-try:
-    import setproctitle
-except ImportError:
-    setproctitle = None
+import setproctitle
+
 
 
 class Trainer():
@@ -334,7 +332,12 @@ class Trainer():
                 # import pdb;pdb.set_trace()
                 if (i+1) % self.save_ckpt_every == 0:
                     print('saving iter ', i+1)
-                    torch.save(self.net.state_dict(), self.ckpt_save_path + f'/{self.model_name}_{i+1}.pth')
+                    torch.save({
+                        "model": self.net.state_dict(),
+                        "optimizer": self.opt.state_dict(),
+                        "scheduler": self.scheduler.state_dict(),
+                        "current step": i + 1
+                    }, self.ckpt_save_path + f'/{self.model_name}_{i+1}.pth')
 
                 pbar.set_description(
 'Step: {}/{} \
@@ -373,9 +376,8 @@ loss_normals.item()) )
 
 
 if __name__ == '__main__':
-    
-    if setproctitle is not None:
-        setproctitle.setproctitle(args.name)
+
+    setproctitle.setproctitle(args.name)
 
     trainer = Trainer(
         megadepth_root_path=args.megadepth_root_path, 
