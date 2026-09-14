@@ -195,20 +195,34 @@ class Trainer():
             except StopIteration:
                 print('End of MD DATASET')
                 self.megadepth_data_iter=iter(self.megadepth_dataloader)
-                megadepth_data=next(self.megadepth_data_iter)
-            if megadepth_data is not None:
-                for k in megadepth_data.keys():
-                    if isinstance(megadepth_data[k],torch.Tensor):
-                        megadepth_data[k]=megadepth_data[k].to(self.dev)
-                megadepth_imgs1_t,megadepth_imgs2_t=megadepth_data['image0'],megadepth_data['image1']
-                megadepth_imgs1_t=megadepth_imgs1_t.mean(1,keepdim=True);megadepth_imgs2_t=megadepth_imgs2_t.mean(1,keepdim=True)
-                imgs1_t.append(megadepth_imgs1_t);imgs2_t.append(megadepth_imgs2_t)
-                megadepth_imgs1_np,megadepth_imgs2_np=megadepth_data['image0_np'],megadepth_data['image1_np']
-                for np_idx in range(megadepth_imgs1_np.shape[0]):
-                    img1_np,img2_np=megadepth_imgs1_np[np_idx].squeeze(0).cpu().numpy(),megadepth_imgs2_np[np_idx].squeeze(0).cpu().numpy()
-                    imgs1_np.append(img1_np);imgs2_np.append(img2_np)
-                positives_megadepth_coarse=megadepth_wrapper.spvs_coarse(megadepth_data,8)
-                positives_coarse += positives_megadepth_coarse
+                try:
+                    megadepth_data=next(self.megadepth_data_iter)
+                except Exception as ex:
+                    print(f'MegaDepth data loading failed: {ex}')
+                    return None
+            except Exception as ex:
+                print(f'MegaDepth data loading failed: {ex}')
+                return None
+
+            if megadepth_data is None:
+                return None
+
+            for k in megadepth_data.keys():
+                if isinstance(megadepth_data[k], torch.Tensor):
+                    megadepth_data[k] = megadepth_data[k].to(self.dev)
+            megadepth_imgs1_t, megadepth_imgs2_t = megadepth_data['image0'], megadepth_data['image1']
+            megadepth_imgs1_t = megadepth_imgs1_t.mean(1, keepdim=True)
+            megadepth_imgs2_t = megadepth_imgs2_t.mean(1, keepdim=True)
+            imgs1_t.append(megadepth_imgs1_t);
+            imgs2_t.append(megadepth_imgs2_t)
+            megadepth_imgs1_np, megadepth_imgs2_np = megadepth_data['image0_np'], megadepth_data['image1_np']
+            for np_idx in range(megadepth_imgs1_np.shape[0]):
+                img1_np, img2_np = megadepth_imgs1_np[np_idx].squeeze(0).cpu().numpy(), megadepth_imgs2_np[
+                    np_idx].squeeze(0).cpu().numpy()
+                imgs1_np.append(img1_np)
+                imgs2_np.append(img2_np)
+            positives_megadepth_coarse = megadepth_wrapper.spvs_coarse(megadepth_data, 8)
+            positives_coarse += positives_megadepth_coarse
                 
         with torch.no_grad():
             if len(imgs1_t) == 0 or len(imgs2_t) == 0:
@@ -225,7 +239,9 @@ class Trainer():
         with tqdm.tqdm(total=self.steps) as pbar:
             for i in range(self.steps):
                 # import pdb;pdb.set_trace()
-                imgs1_t,imgs2_t,imgs1_np,imgs2_np,positives_coarse=self.generate_train_data()
+                temp =self.generate_train_data()
+                if temp is None: continue
+                imgs1_t, imgs2_t, imgs1_np, imgs2_np, positives_coarse = temp
 
                 #Check if batch is corrupted with too few correspondences
                 is_corrupted = False
