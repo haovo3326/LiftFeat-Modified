@@ -29,6 +29,9 @@ def parse_arguments():
     parser.add_argument('--ckpt_save_path', type=str,
                         default='/kaggle/working/trained_weights/megadepth',
                         help='Path to save the checkpoints.')
+    parser.add_argument('--latest_ckpt_path', type=str,
+                        default=None,
+                        help='Path to a checkpoint to resume from. If omitted, the latest checkpoint in ckpt_save_path is used.')
     parser.add_argument('--n_steps', type=int, default=80_000,
                         help='Number of training steps. Default is 80000.')
     parser.add_argument('--lr', type=float, default=5e-5,
@@ -80,11 +83,36 @@ from dataset.coco_augmentor import COCOAugmentor
 import setproctitle
 
 
+def find_latest_checkpoint(ckpt_save_path, model_name):
+    prefix = f'{model_name}_'
+    latest_step = -1
+    latest_path = None
+
+    for ckpt_path in glob.glob(os.path.join(ckpt_save_path, f'{prefix}*.pth')):
+        ckpt_name = os.path.splitext(os.path.basename(ckpt_path))[0]
+        step_text = ckpt_name[len(prefix):]
+        if not step_text.isdigit():
+            continue
+        step = int(step_text)
+        if step > latest_step:
+            latest_step = step
+            latest_path = ckpt_path
+
+    return latest_path
+
+
+def move_optimizer_state_to_device(optimizer, device):
+    for state in optimizer.state.values():
+        for key, value in state.items():
+            if isinstance(value, torch.Tensor):
+                state[key] = value.to(device)
+
 
 class Trainer():
     def __init__(self, megadepth_root_path,use_megadepth,megadepth_batch_size,
                        coco_root_path,use_coco,coco_batch_size,
-                       ckpt_save_path, 
+                       ckpt_save_path,
+                       latest_ckpt_path,
                        model_name = 'LiftFeat',
                        n_steps = 80_000, lr= 1e-4, gamma_steplr=0.7,
                        training_res = (800, 608), device_num="0", dry_run = False,
@@ -168,12 +196,26 @@ class Trainer():
         self.writer = SummaryWriter(ckpt_save_path + f'/logdir/{model_name}_' + time.strftime("%Y_%m_%d-%H_%M_%S"))
         self.model_name = model_name
         self.use_coord_loss = use_coord_loss
+        self.current_step = 0
 
-        ##################### INHERIT PRETRAINED WEIGHT ###################
-        print("Loading pretrained model...")
-        self.net, _ = apply_weight(self.net, "weights/LiftFeat.pth")
-        print("Pretrained model loaded.")
-        ###################################################################
+        ##################### LOAD CHECKPOINT / PRETRAINED WEIGHT ###################
+        ckpt_path = latest_ckpt_path or find_latest_checkpoint(ckpt_save_path, model_name)
+        if ckpt_path is not None:
+            if not os.path.isfile(ckpt_path):
+                raise FileNotFoundError(f'Checkpoint not found: {ckpt_path}')
+            print(f'Loading checkpoint: {ckpt_path}')
+            checkpoint = torch.load(ckpt_path, map_location='cpu')
+            self.net.load_state_dict(checkpoint['model'])
+            self.opt.load_state_dict(checkpoint['optimizer'])
+            self.scheduler.load_state_dict(checkpoint['scheduler'])
+            move_optimizer_state_to_device(self.opt, self.dev)
+            self.current_step = checkpoint.get('step', checkpoint.get('current step', 0))
+            print(f'Resuming from step {self.current_step}.')
+        else:
+            print("Loading pretrained model...")
+            self.net, _ = apply_weight(self.net, "weights/LiftFeat.pth")
+            print("Pretrained model loaded.")
+        ###########################################################################
         
     def generate_train_data(self):
         imgs1_t,imgs2_t=[],[]
@@ -213,7 +255,7 @@ class Trainer():
             megadepth_imgs1_t, megadepth_imgs2_t = megadepth_data['image0'], megadepth_data['image1']
             megadepth_imgs1_t = megadepth_imgs1_t.mean(1, keepdim=True)
             megadepth_imgs2_t = megadepth_imgs2_t.mean(1, keepdim=True)
-            imgs1_t.append(megadepth_imgs1_t);
+            imgs1_t.append(megadepth_imgs1_t)
             imgs2_t.append(megadepth_imgs2_t)
             megadepth_imgs1_np, megadepth_imgs2_np = megadepth_data['image0_np'], megadepth_data['image1_np']
             for np_idx in range(megadepth_imgs1_np.shape[0]):
@@ -236,8 +278,8 @@ class Trainer():
     def train(self):
         self.net.train()
 
-        with tqdm.tqdm(total=self.steps) as pbar:
-            for i in range(self.steps):
+        with tqdm.tqdm(total=self.steps, initial=self.current_step) as pbar:
+            for i in range(self.current_step, self.steps):
                 # import pdb;pdb.set_trace()
                 temp =self.generate_train_data()
                 if temp is None: continue
@@ -352,6 +394,7 @@ class Trainer():
                         "model": self.net.state_dict(),
                         "optimizer": self.opt.state_dict(),
                         "scheduler": self.scheduler.state_dict(),
+                        "step": i + 1,
                         "current step": i + 1
                     }, self.ckpt_save_path + f'/{self.model_name}_{i+1}.pth')
 
@@ -403,6 +446,7 @@ if __name__ == '__main__':
         use_coco=args.use_coco,
         coco_batch_size=args.coco_batch_size,
         ckpt_save_path=args.ckpt_save_path,
+        latest_ckpt_path=args.latest_ckpt_path,
         n_steps=args.n_steps,
         lr=args.lr,
         gamma_steplr=args.gamma_steplr,
