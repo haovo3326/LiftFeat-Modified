@@ -167,7 +167,7 @@ class Trainer():
         self.use_megadepth=use_megadepth
         self.megadepth_batch_size=megadepth_batch_size
         if self.use_megadepth:
-            TRAIN_BASE_PATH = f"{megadepth_root_path}/haovo3326/megadepth-metadata/train_data/megadepth_indices"
+            TRAIN_BASE_PATH = f"{megadepth_root_path}/thanhbih/megadepth-metadata/train_data/megadepth_indices"
             TRAINVAL_DATA_SOURCE = [
                 f"{megadepth_root_path}/kashiwaba/megadepth-v1-p1/MegaDepth_v1_p1",
                 f"{megadepth_root_path}/kashiwaba/megadepth-v1-p2/MegaDepth_v1_p2",
