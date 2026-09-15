@@ -52,10 +52,13 @@ def tensor2bgr(t):
     return (t.cpu()[0].permute(1,2,0).numpy()*255).astype(np.uint8)
 
 def compute_pose_error(match_fn,data):
-    result = {}
+    result = {"R_err": float("inf"), "t_err": float("inf")}
     
     with torch.no_grad():
         mkpts0,mkpts1=match_fn(tensor2bgr(data["image0"]),tensor2bgr(data["image1"]))
+
+    if len(mkpts0) < 5 or len(mkpts1) < 5:
+        return result
 
     mkpts0=mkpts0 * data["scale0"].numpy()
     mkpts1=mkpts1 * data["scale1"].numpy()
@@ -64,10 +67,13 @@ def compute_pose_error(match_fn,data):
     T_0to1 = data["T_0to1"][0].numpy()
     T_1to0 = data["T_1to0"][0].numpy()
 
-    result={}
     conf = 0.99999
     
-    ret = estimate_pose(mkpts0,mkpts1,K0,K1,4.0,conf)
+    try:
+        ret = estimate_pose(mkpts0,mkpts1,K0,K1,4.0,conf)
+    except (RuntimeError, ValueError):
+        return result
+
     if ret is not None:
         R, t, inliers = ret
         t_err, R_err = relative_pose_error(T_0to1, R, t, ignore_gt_t_thr=0.0)

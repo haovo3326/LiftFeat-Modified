@@ -44,30 +44,44 @@ class NonMaxSuppression(torch.nn.Module):
 
 
 def load_model(model, weight_path):
-    pretrained_weights = torch.load(weight_path, map_location="cpu")
+    checkpoint = torch.load(weight_path, map_location="cpu")
+    if isinstance(checkpoint, dict) and "model" in checkpoint:
+        pretrained_weights = checkpoint["model"]
+    elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        pretrained_weights = checkpoint["state_dict"]
+    else:
+        pretrained_weights = checkpoint
+
+    pretrained_weights = {
+        k[len("module."):] if k.startswith("module.") else k: v
+        for k, v in pretrained_weights.items()
+    }
 
     model_keys = set(model.state_dict().keys())
     pretrained_keys = set(pretrained_weights.keys())
 
     missing_keys = model_keys - pretrained_keys
     unexpected_keys = pretrained_keys - model_keys
+    shape_mismatch_keys = [
+        k for k in sorted(model_keys & pretrained_keys)
+        if model.state_dict()[k].shape != pretrained_weights[k].shape
+    ]
 
-    # if missing_keys:
-    #     print("Missing keys in pretrained weights:", missing_keys)
-    # else:
-    #     print("No missing keys in pretrained weights.")
+    compatible_weights = {
+        k: v for k, v in pretrained_weights.items()
+        if k in model_keys and k not in shape_mismatch_keys
+    }
 
-    # if unexpected_keys:
-    #     print("Unexpected keys in pretrained weights:", unexpected_keys)
-    # else:
-    #     print("No unexpected keys in pretrained weights.")
-
-    if not missing_keys and not unexpected_keys:
-        model.load_state_dict(pretrained_weights)
+    if not missing_keys and not unexpected_keys and not shape_mismatch_keys:
+        model.load_state_dict(compatible_weights)
         print("load weight successfully.")
     else:
-        model.load_state_dict(pretrained_weights, strict=False)
+        load_info = model.load_state_dict(compatible_weights, strict=False)
         print("There were issues with the keys.")
+        print(f"  loaded tensors: {len(compatible_weights)}")
+        print(f"  missing keys: {len(load_info.missing_keys)}")
+        print(f"  unexpected keys: {len(unexpected_keys)}")
+        print(f"  shape mismatches: {len(shape_mismatch_keys)}")
     return model
 
 
@@ -132,6 +146,13 @@ class LiftFeat(nn.Module):
         mask_h = kpts[..., 1] < (_H1 - pad_info[1])
         kpts = kpts[mask_h]
 
+        if kpts.numel() == 0:
+            return {
+                "descriptors": descs_map.new_empty((0, descs_map.shape[1])),
+                "keypoints": kpts.reshape(0, 2),
+                "scores": heatmap.new_empty((0,)),
+            }
+
         scores = self.sampler(heatmap, kpts.unsqueeze(0), _H1, _W1)
         scores = scores.squeeze(0).reshape(-1)
         descs = self.sampler(descs_map, kpts.unsqueeze(0), _H1, _W1)
@@ -147,6 +168,10 @@ class LiftFeat(nn.Module):
 
         kpts1, feats1 = data1["keypoints"], data1["descriptors"]
         kpts2, feats2 = data2["keypoints"], data2["descriptors"]
+
+        if feats1.shape[0] == 0 or feats2.shape[0] == 0:
+            empty = np.empty((0, 2), dtype=np.float32)
+            return empty, empty
 
         cossim = feats1 @ feats2.t()
         cossim_t = feats2 @ feats1.t()
