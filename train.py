@@ -12,7 +12,11 @@ sys.path.append(os.path.dirname(__file__))
 def parse_arguments():
     parser = argparse.ArgumentParser(description="LiftFeat training script.")
     parser.add_argument('--name',type=str,default='LiftFeat',help='set process name')
-    
+
+    # Kaggle host
+    parser.add_argument('--kaggle_host_id', type=int, default=0,
+                        help='Kaggle host ID used to select a host/user name for /kaggle/input paths.')
+
     # MegaDepth dataset setting
     parser.add_argument('--use_megadepth',action='store_true')
     parser.add_argument('--megadepth_root_path', type=str,
@@ -109,14 +113,14 @@ def move_optimizer_state_to_device(optimizer, device):
 
 
 class Trainer():
-    def __init__(self, megadepth_root_path,use_megadepth,megadepth_batch_size,
-                       coco_root_path,use_coco,coco_batch_size,
-                       ckpt_save_path,
-                       latest_ckpt_path,
-                       model_name = 'LiftFeat',
-                       n_steps = 80_000, lr= 1e-4, gamma_steplr=0.7,
-                       training_res = (800, 608), device_num="0", dry_run = False,
-                       save_ckpt_every = 2000, use_coord_loss = False):
+    def __init__(self, kaggle_host_id, megadepth_root_path, use_megadepth, megadepth_batch_size,
+                 coco_root_path, use_coco, coco_batch_size,
+                 ckpt_save_path,
+                 latest_ckpt_path,
+                 model_name = 'LiftFeat',
+                 n_steps = 80_000, lr= 1e-4, gamma_steplr=0.7,
+                 training_res = (800, 608), device_num="0", dry_run = False,
+                 save_ckpt_every = 2000, use_coord_loss = False):
         coco_batch_size = coco_batch_size if use_coco else 0
         print(f'MegeDepth: {use_megadepth}-{megadepth_batch_size}')
         print(f'COCO20k: {use_coco}-{coco_batch_size}')
@@ -167,7 +171,9 @@ class Trainer():
         self.use_megadepth=use_megadepth
         self.megadepth_batch_size=megadepth_batch_size
         if self.use_megadepth:
-            TRAIN_BASE_PATH = f"{megadepth_root_path}/haovo3326/megadepth-metadata/train_data/megadepth_indices"
+            host_names = ["haovo3326", "thanhbih", "makago"]
+
+            TRAIN_BASE_PATH = f"{megadepth_root_path}/{host_names[kaggle_host_id]}/megadepth-metadata/train_data/megadepth_indices"
             TRAINVAL_DATA_SOURCE = [
                 f"{megadepth_root_path}/kashiwaba/megadepth-v1-p1/MegaDepth_v1_p1",
                 f"{megadepth_root_path}/kashiwaba/megadepth-v1-p2/MegaDepth_v1_p2",
@@ -406,14 +412,14 @@ loss_coordinates: {:.3f} acc_coordinates: {:.3f} \
 loss_fb_descs: {:.3f} acc_fb_coarse: {:.3f} \
 loss_fb_coordinates: {:.3f} acc_fb_coordinates: {:.3f} \
 loss_kpts: {:.3f} acc_kpts: {:.3f} \
-loss_normals: {:.3f}'.format( \
- i+1, self.steps, \
-loss.item(), \
-loss_descs.item(), acc_coarse, \
-loss_coordinates.item(), acc_coordinates, \
-loss_fb_descs.item(), acc_fb_coarse, \
-loss_fb_coordinates.item(), acc_fb_coordinates, \
-loss_kpts.item(), acc_kpt, \
+loss_normals: {:.3f}'.format(
+ i+1, self.steps,
+loss.item(),
+loss_descs.item(), acc_coarse,
+loss_coordinates.item(), acc_coordinates,
+loss_fb_descs.item(), acc_fb_coarse,
+loss_fb_coordinates.item(), acc_fb_coordinates,
+loss_kpts.item(), acc_kpt,
 loss_normals.item()) )
 
                 pbar.update(1)
@@ -439,6 +445,7 @@ if __name__ == '__main__':
     setproctitle.setproctitle(args.name)
 
     trainer = Trainer(
+        kaggle_host_id=args.kaggle_host_id,
         megadepth_root_path=args.megadepth_root_path, 
         use_megadepth=args.use_megadepth,
         megadepth_batch_size=args.megadepth_batch_size,
