@@ -35,7 +35,7 @@ def parse_arguments():
                         help='Path to save the checkpoints.')
     parser.add_argument('--latest_ckpt_path', type=str,
                         default=None,
-                        help='Path to a checkpoint to resume from. If omitted, the latest checkpoint in ckpt_save_path is used.')
+                        help='Path to a checkpoint to resume from. If omitted or missing, training starts from scratch.')
     parser.add_argument('--n_steps', type=int, default=80_000,
                         help='Number of training steps. Default is 80000.')
     parser.add_argument('--lr', type=float, default=5e-5,
@@ -77,7 +77,6 @@ from utils.config import featureboost_config
 from models.interpolator import InterpolateSparse2d
 from utils.depth_anything_wrapper import DepthAnythingExtractor
 from utils.alike_wrapper import ALikeExtractor
-from utils.apply_pretrained_weight import apply_weight
 
 from dataset import megadepth_wrapper
 from dataset import coco_wrapper
@@ -85,24 +84,6 @@ from dataset.megadepth import MegaDepthDataset
 from dataset.coco_augmentor import COCOAugmentor
 
 import setproctitle
-
-
-def find_latest_checkpoint(ckpt_save_path, model_name):
-    prefix = f'{model_name}_'
-    latest_step = -1
-    latest_path = None
-
-    for ckpt_path in glob.glob(os.path.join(ckpt_save_path, f'{prefix}*.pth')):
-        ckpt_name = os.path.splitext(os.path.basename(ckpt_path))[0]
-        step_text = ckpt_name[len(prefix):]
-        if not step_text.isdigit():
-            continue
-        step = int(step_text)
-        if step > latest_step:
-            latest_step = step
-            latest_path = ckpt_path
-
-    return latest_path
 
 
 def move_optimizer_state_to_device(optimizer, device):
@@ -205,10 +186,8 @@ class Trainer():
         self.current_step = 0
 
         ##################### LOAD CHECKPOINT / PRETRAINED WEIGHT ###################
-        ckpt_path = latest_ckpt_path or find_latest_checkpoint(ckpt_save_path, model_name)
-        if ckpt_path is not None:
-            if not os.path.isfile(ckpt_path):
-                raise FileNotFoundError(f'Checkpoint not found: {ckpt_path}')
+        ckpt_path = latest_ckpt_path
+        if ckpt_path is not None and os.path.isfile(ckpt_path):
             print(f'Loading checkpoint: {ckpt_path}')
             checkpoint = torch.load(ckpt_path, map_location='cpu')
             self.net.load_state_dict(checkpoint['model'])
@@ -218,9 +197,10 @@ class Trainer():
             self.current_step = checkpoint.get('step', checkpoint.get('current step', 0))
             print(f'Resuming from step {self.current_step}.')
         else:
-            print("Loading pretrained model...")
-            self.net, _ = apply_weight(self.net, "weights/LiftFeat.pth")
-            print("Pretrained model loaded.")
+            if ckpt_path is None:
+                print('No checkpoint path provided. Starting training from scratch.')
+            else:
+                print(f'Checkpoint not found: {ckpt_path}. Starting training from scratch.')
         ###########################################################################
         
     def generate_train_data(self):
