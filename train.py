@@ -126,7 +126,7 @@ class Trainer():
         #Setup optimizer 
         self.steps = n_steps
         self.opt = optim.Adam(filter(lambda x: x.requires_grad, self.net.parameters()) , lr = lr)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=10_000, gamma=gamma_steplr)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=30_000, gamma=gamma_steplr)
 
         ##################### COCO INIT ##########################
         self.use_coco=use_coco
