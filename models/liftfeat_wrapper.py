@@ -7,7 +7,7 @@ import cv2
 
 from models.model import LiftFeatSPModel
 from models.interpolator import InterpolateSparse2d
-from utils.config import featureboost_config
+from utils.config import modified_fusion_featureboost_config
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -92,7 +92,7 @@ class LiftFeat(nn.Module):
     def __init__(self, weight=MODEL_PATH, top_k=4096, detect_threshold=0.1):
         super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.net = LiftFeatSPModel(featureboost_config).to(self.device).eval()
+        self.net = LiftFeatSPModel(modified_fusion_featureboost_config).to(self.device).eval()
         self.top_k = top_k
         self.sampler = InterpolateSparse2d("bicubic")
         self.net = load_model(self.net, weight)

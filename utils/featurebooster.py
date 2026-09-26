@@ -6,21 +6,53 @@ import torch.nn.functional as F
 
 
 def MLP(channels: List[int], do_bn: bool = False) -> nn.Module:
-    """ Multi-layer perceptron """
-    n = len(channels)
+    """Multi-layer perceptron."""
     layers = []
-    for i in range(1, n):
+    for i in range(1, len(channels)):
         layers.append(nn.Linear(channels[i - 1], channels[i]))
-        if i < (n-1):
+        if i < len(channels) - 1:
             if do_bn:
                 layers.append(nn.BatchNorm1d(channels[i]))
             layers.append(nn.ReLU())
     return nn.Sequential(*layers)
 
-class AFTAttention(nn.Module):
-    """ Attention-free attention """
-    def __init__(self, d_model: int, n_heads) -> None:
+
+def MLP_no_ReLU(channels: List[int], do_bn: bool = False) -> nn.Module:
+    """Multi-layer perceptron without hidden ReLU activations."""
+    layers = []
+    for i in range(1, len(channels)):
+        layers.append(nn.Linear(channels[i - 1], channels[i]))
+        if i < len(channels) - 1 and do_bn:
+            layers.append(nn.BatchNorm1d(channels[i]))
+    return nn.Sequential(*layers)
+
+
+class NormalEncoder(nn.Module):
+    """Encoding of normal geometry using MLP."""
+    def __init__(self, normal_dim: int, feature_dim: int, layers: List[int]) -> None:
         super().__init__()
+        self.encoder = MLP_no_ReLU([normal_dim] + layers + [feature_dim])
+
+    def forward(self, normals: torch.Tensor) -> torch.Tensor:
+        return self.encoder(normals)
+
+
+class DescriptorEncoder(nn.Module):
+    """Encoding of visual descriptors using residual MLP."""
+    def __init__(self, feature_dim: int, layers: List[int]) -> None:
+        super().__init__()
+        self.encoder = MLP([feature_dim] + layers + [feature_dim])
+
+    def forward(self, desc: torch.Tensor) -> torch.Tensor:
+        return desc + self.encoder(desc)
+
+
+class AFTAttention(nn.Module):
+    """Attention-free attention."""
+    def __init__(self, d_model: int, n_heads: int = 1) -> None:
+        super().__init__()
+        if d_model % n_heads != 0:
+            raise ValueError(f"d_model ({d_model}) must be divisible by n_heads ({n_heads}).")
         self.d_model = d_model
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
@@ -32,81 +64,57 @@ class AFTAttention(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
 
-        N, D = x.shape
-
+        n_tokens, dim = x.shape
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
 
-        # [N, D] -> [N, H, d_k]
-        q = q.view(N, self.n_heads, self.d_k)
-        k = k.view(N, self.n_heads, self.d_k)
-        v = v.view(N, self.n_heads, self.d_k)
+        q = q.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
+        k = k.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
+        v = v.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
 
-        # [N, H, d_k] -> [H, N, d_k]
-        q = q.transpose(0, 1)
-        k = k.transpose(0, 1)
-        v = v.transpose(0, 1)
-
-        # normalize keys over tokens
         k = torch.softmax(k, dim=-2)
-
-        # [H, N, d_k] -> [H, 1, d_k]
         kv = (k * v).sum(dim=-2, keepdim=True)
-
-        # [H, N, d_k]
         x = q * kv
 
-        # concatenate heads
-        # [H, N, d_k] -> [N, H, d_k]
-        x = x.transpose(0, 1)
-
-        # [N, H, d_k] -> [N, D]
-        x = x.reshape(N, D)
-
+        x = x.transpose(0, 1).reshape(n_tokens, dim)
         x = self.proj(x)
-
-        # residual
-        x = x + residual
-
-        return x
+        return x + residual
 
 
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, feature_dim: int) -> None:
         super().__init__()
-        self.mlp = MLP([feature_dim, feature_dim*2, feature_dim])
+        self.mlp = MLP([feature_dim, feature_dim * 2, feature_dim])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        x = self.mlp(x)
-        x += residual
-        return x
+        return x + self.mlp(x)
 
 
 class AttentionalLayer(nn.Module):
-    def __init__(self, feature_dim: int, num_heads: int):
+    def __init__(self, feature_dim: int, num_heads: int = 1):
         super().__init__()
         self.attn = AFTAttention(feature_dim, num_heads)
         self.ffn = PositionwiseFeedForward(feature_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.attn(x)
-        x = self.ffn(x)
-        return x
+        return self.ffn(x)
 
 
 class AttentionalNN(nn.Module):
-    def __init__(self, feature_dim: int, num_heads, layer_num: int) -> None:
+    def __init__(self, feature_dim: int, layer_num: int, num_heads: int = 1) -> None:
         super().__init__()
         self.layers = nn.ModuleList([
             AttentionalLayer(feature_dim, num_heads)
-            for _ in range(layer_num)])
+            for _ in range(layer_num)
+        ])
 
     def forward(self, desc: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
             desc = layer(desc)
         return desc
+
 
 class PointwiseProjection(nn.Module):
     def __init__(self, input_dim: int, output_dim: int):
@@ -114,101 +122,143 @@ class PointwiseProjection(nn.Module):
         self.proj = nn.Conv1d(input_dim, output_dim, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Pointwise 1x1 projection for token features shaped as (N, C).
         x = x.t().unsqueeze(0)
         x = self.proj(x)
         return x.squeeze(0).t()
 
+
 class FeatureProjection(nn.Module):
-    """
-    Project the 64-dimensional attended GFL feature back to descriptor space.
-    """
+    """Project concatenated descriptor and normal features back to descriptor space."""
     def __init__(self, input_dim: int, output_dim: int, layers: List[int]):
         super().__init__()
         self.mlp = MLP([input_dim] + layers + [output_dim])
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(x)
 
 
 class FeatureBooster(nn.Module):
     default_config = {
-        'descriptor_dim': 128,
-        'normal_dim': 192,
-        'feature_projection': [128, 64, 64],
-        'Attentional_layers': 3,
-        'last_activation': 'relu',
-        'l2_normalization': True,
+        "modified": False,
+        "descriptor_dim": 128,
+        "normal_dim": 192,
+        "normal_encoder": [32, 64, 128],
+        "descriptor_encoder": [64, 64],
+        "feature_projection": [128, 64, 64],
+        "num_heads": 1,
+        "Attentional_layers": 3,
+        "last_activation": "relu",
+        "l2_normalization": True,
+        "output_dim": 128,
     }
 
     def __init__(self, config):
         super().__init__()
         self.config = {**self.default_config, **config}
+        self.modified = self.config.get("modified") is True
 
-        self.desc_proj = PointwiseProjection(self.config['descriptor_dim'], self.config['descriptor_dim'])
-        self.normal_proj = PointwiseProjection(self.config['normal_dim'], self.config['descriptor_dim'])
-
-
-        self.feat_project = FeatureProjection(
-            input_dim=self.config['descriptor_dim'] * 2,
-            output_dim=self.config['descriptor_dim'],
-            layers=self.config['feature_projection'],
-        )
-
-        self.attention_dim = self.config['descriptor_dim']
-
-        self.attn_proj = AttentionalNN(
-            feature_dim=self.attention_dim,
-            num_heads= self.config['num_heads'],
-            layer_num=self.config['Attentional_layers']
-        )
-
-        if self.config.get('last_activation', False):
-            if self.config['last_activation'].lower() == 'relu':
-                self.last_activation = nn.ReLU()
-            elif self.config['last_activation'].lower() == 'sigmoid':
-                self.last_activation = nn.Sigmoid()
-            elif self.config['last_activation'].lower() == 'tanh':
-                self.last_activation = nn.Tanh()
-            else:
-                raise Exception('Not supported activation "%s".' % self.config['last_activation'])
+        if self.modified:
+            self._init_modified()
         else:
-            self.last_activation = None
+            self._init_original()
+
+        self.last_activation = self._make_activation(self.config.get("last_activation"))
+
+    def _init_modified(self) -> None:
+        descriptor_dim = self.config["descriptor_dim"]
+        self.desc_proj = PointwiseProjection(descriptor_dim, descriptor_dim)
+        self.normal_proj = PointwiseProjection(self.config["normal_dim"], descriptor_dim)
+        self.feat_project = FeatureProjection(
+            input_dim=descriptor_dim * 2,
+            output_dim=descriptor_dim,
+            layers=self.config["feature_projection"],
+        )
+        self.attn_proj = AttentionalNN(
+            feature_dim=descriptor_dim,
+            layer_num=self.config["Attentional_layers"],
+            num_heads=self.config["num_heads"],
+        )
+
+    def _init_original(self) -> None:
+        descriptor_dim = self.config["descriptor_dim"]
+        self.nenc = NormalEncoder(
+            self.config["normal_dim"],
+            descriptor_dim,
+            self.config["normal_encoder"],
+        )
+        self.denc = DescriptorEncoder(descriptor_dim, self.config["descriptor_encoder"])
+        self.attn_proj = AttentionalNN(
+            feature_dim=descriptor_dim,
+            layer_num=self.config["Attentional_layers"],
+            num_heads=self.config["num_heads"],
+        )
+
+    @staticmethod
+    def _make_activation(activation):
+        if not activation:
+            return None
+        activation = activation.lower()
+        if activation == "relu":
+            return nn.ReLU()
+        if activation == "sigmoid":
+            return nn.Sigmoid()
+        if activation == "tanh":
+            return nn.Tanh()
+        raise ValueError(f'Not supported activation "{activation}".')
 
     """
-    Architectural Ablation Study
-    Variant         Fusion                      Attention Head      Residual    
-    M1*             1x1 Conv + Concat + MLP     Single              No          
-    M2              1x1 Conv + Concat + MLP     Single              No
-    M3              1x1 Conv + Concat + MLP     Multi               No
-    M4              1x1 Conv + Concat + MLP     Multi               Yes     
+    3D GFL Ablation Study
+    Variations          Fusion                      Attention Head      Residual    In Training
+    GFL0 (LiftFeat)     2x MLP                      Single              No          
+    GFL1                1x1 Conv + Concat + MLP     Single              No
+    GFL2                2x MLP                      Multi               No
+    GFL3                2x MLP                      Single              Yes
+    GFL4 (Aggregated)   1x1 Conv + Concat + MLP     Multi               Yes
     """
-    def forward(self, desc, normals):
-        residual = desc
-        desc = self.desc_proj(desc)                         # raw desc -> 1x1 Conv -> new desc
-        normals = self.normal_proj(normals)                 # raw normals -> 1x1 Conv -> new normals
-        desc = torch.cat([desc, normals], dim = -1) # Concatenation: [desc: normals]
-        desc = self.feat_project(desc)                      # MLP projection
-        desc = self.attn_proj(desc)                         # Multi-head/Single-head attention
-        desc = desc + residual
+    def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
+        if self.modified:
+            if len(inputs) != 1:
+                raise TypeError("Modified FeatureBooster expects forward(desc, normals).")
+            desc = self._forward_modified(desc, inputs[0])
+        else:
+            if len(inputs) != 1:
+                raise TypeError("Original FeatureBooster expects forward(desc, normals).")
+            desc = self._forward_original(desc, inputs[0])
 
         if self.last_activation is not None:
             desc = self.last_activation(desc)
-        # L2 normalization
-        if self.config['l2_normalization']:
+        if self.config["l2_normalization"]:
             desc = F.normalize(desc, dim=-1)
-
         return desc
 
+    def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
+        residual = desc
+        desc = self.desc_proj(desc)
+        normals = self.normal_proj(normals)
+        desc = torch.cat([desc, normals], dim=-1)
+        desc = self.feat_project(desc)
+        desc = self.attn_proj(desc)
+        return desc + residual
+
+    def _forward_original(
+        self,
+        desc: torch.Tensor,
+        normals: torch.Tensor,
+    ) -> torch.Tensor:
+        desc = self.denc(desc)
+        desc = desc + self.nenc(normals)
+        return self.attn_proj(desc)
+
+
 if __name__ == "__main__":
-    from config import featureboost_config
-    fb_net = FeatureBooster(featureboost_config)
+    from config import modified_fusion_featureboost_config, original_fusion_featureboost_config
 
-    descs=torch.randn([1900,64])
-    normals=torch.randn([1900,192])
+    modified_net = FeatureBooster(modified_fusion_featureboost_config)
+    descs = torch.randn([1900, 64])
+    normals = torch.randn([1900, 192])
+    descs_refine = modified_net(descs, normals)
+    print(descs_refine.shape)
 
-    import pdb;pdb.set_trace()
-
-    descs_refine=fb_net(descs,normals)
-
+    original_net = FeatureBooster(original_fusion_featureboost_config)
+    descs_refine = original_net(descs, normals)
     print(descs_refine.shape)
