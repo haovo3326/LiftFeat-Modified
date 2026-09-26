@@ -209,7 +209,7 @@ class FeatureBooster(nn.Module):
     """
     3D GFL Ablation Study
     Variations          Fusion                      Attention Head      Residual    In Training
-    GFL0 (LiftFeat)     2x MLP                      Single              No          
+    GFL0 (LiftFeat)     2x MLP                      Single              No          X          
     GFL1                1x1 Conv + Concat + MLP     Single              No
     GFL2                2x MLP                      Multi               No
     GFL3                2x MLP                      Single              Yes
