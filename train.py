@@ -114,7 +114,7 @@ class Trainer():
             print(f'GPU: {torch.cuda.get_device_name(0)}')
 
         # training model
-        self.net = LiftFeatSPModel(modified_fusion_featureboost_config).to(self.dev)
+        self.net = LiftFeatSPModel(original_fusion_featureboost_config).to(self.dev)
         self.loss_fn=LiftFeatLoss(self.dev,lam_descs=1,lam_kpts=2,lam_heatmap=1)
         
         # depth-anything model
