@@ -209,8 +209,8 @@ class FeatureBooster(nn.Module):
     """
     3D GFL Ablation Study
     Variations          Fusion                      Attention Head      Residual    In Training
-    GFL0 (LiftFeat)     2x MLP                      Single              No          X          
-    GFL1                1x1 Conv + Concat + MLP     Single              No
+    GFL0 (LiftFeat)     2x MLP                      Single              No                    
+    GFL1                1x1 Conv + Concat + MLP     Single              No          X
     GFL2                2x MLP                      Multi               No
     GFL3                2x MLP                      Single              Yes
     GFL4 (Aggregated)   1x1 Conv + Concat + MLP     Multi               Yes
@@ -238,7 +238,7 @@ class FeatureBooster(nn.Module):
         desc = torch.cat([desc, normals], dim=-1)
         desc = self.feat_project(desc)
         desc = self.attn_proj(desc)
-        return desc + residual
+        return desc
 
     def _forward_original(
         self,
