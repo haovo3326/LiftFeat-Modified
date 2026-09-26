@@ -19,7 +19,7 @@ original_fusion_featureboost_config = {
     "normal_encoder": [128, 64, 64],
     "descriptor_encoder": [64, 64],
     "descriptor_dim": 64,
-    "num_heads": 4,
+    "num_heads": 1,
     "Attentional_layers": 3,
     "last_activation": None,
     "l2_normalization": None,
