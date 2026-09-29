@@ -137,15 +137,39 @@ class UpsampleLayer(nn.Module):
 class KeypointHead(nn.Module):
     def __init__(self,in_channels,out_channels):
         super().__init__()
+        self.fused_conv = nn.Conv2d(in_channels=4, out_channels=1, dilation=1, kernel_size=3, stride=1, padding=1)
+
         self.layer1=BaseLayer(in_channels,32)
         self.layer2=BaseLayer(32,32)
         self.layer3=BaseLayer(32,64)
         self.layer4=BaseLayer(64,64)
         self.layer5=BaseLayer(64,128)
         
-        self.conv=nn.Conv2d(128,out_channels,kernel_size=3,stride=1,padding=1)
+        self.conv=nn.Conv2d(128,out_channels,kernel_size=3, stride=1,padding=1)
         self.bn=nn.BatchNorm2d(65)
-        
+
+    def pseudo_forward(self, x, normal):
+        """
+        Version 1:
+        - Flatten X from W/8 x H/8 x 64 -> W x H x 1
+        - Stack with Normal (W x H x 3)
+        - Use dilated 3x3 convolution to fused multi-channels
+        - Reshape back to W/8 x H/8 x 64
+        """
+        if x.shape[1] != 64:
+            raise ValueError(f"Expected x to have 64 channels, got {x.shape[1]}.")
+        if normal.shape[1] != 3:
+            raise ValueError(f"Expected normal to have 3 channels, got {normal.shape[1]}.")
+
+        x = F.pixel_shuffle(x, upscale_factor=8)
+        if normal.shape[-2:] != x.shape[-2:]:
+            normal = F.interpolate(normal, size=x.shape[-2:], mode="bilinear", align_corners=False)
+
+        x = torch.cat([x, normal], dim=1)
+        x = self.fused_conv(x)
+        x = F.pixel_unshuffle(x, downscale_factor=8)
+        return self.forward(x)
+
     def forward(self,x):
         x=self.layer1(x)
         x=self.layer2(x)
