@@ -117,6 +117,36 @@ def sample_descriptors_fix_sampling(keypoints, descriptors, s: int = 8):
     return descriptors
 
 
+class BaseLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False, activation=True):
+        super().__init__()
+        if activation:
+            self.layer = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias),
+                nn.BatchNorm2d(out_channels, affine=False),
+                nn.ReLU(inplace=True)
+            )
+        else:
+            self.layer = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias),
+                nn.BatchNorm2d(out_channels, affine=False)
+            )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+class PointwiseProjection(nn.Module):
+    def __init__(self, input_dim: int, output_dim: int):
+        super().__init__()
+        self.proj = nn.Conv1d(input_dim, output_dim, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.t().unsqueeze(0)
+        x = self.proj(x)
+        return x.squeeze(0).t()
+
+
 class UpsampleLayer(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -137,7 +167,7 @@ class UpsampleLayer(nn.Module):
 class KeypointHead(nn.Module):
     def __init__(self,in_channels,out_channels):
         super().__init__()
-        self.fused_conv = nn.Conv2d(in_channels=4, out_channels=1, dilation=1, kernel_size=3, stride=1, padding=1)
+        self.channel_projection = nn.Conv2d(in_channels + 192, in_channels, kernel_size=1, bias=False)
 
         self.layer1=BaseLayer(in_channels,32)
         self.layer2=BaseLayer(32,32)
@@ -149,25 +179,12 @@ class KeypointHead(nn.Module):
         self.bn=nn.BatchNorm2d(65)
 
     def pseudo_forward(self, x, normal):
-        """
-        Version 1:
-        - Flatten X from W/8 x H/8 x 64 -> W x H x 1
-        - Stack with Normal (W x H x 3)
-        - Use dilated 3x3 convolution to fused multi-channels
-        - Reshape back to W/8 x H/8 x 64
-        """
-        if x.shape[1] != 64:
-            raise ValueError(f"Expected x to have 64 channels, got {x.shape[1]}.")
-        if normal.shape[1] != 3:
-            raise ValueError(f"Expected normal to have 3 channels, got {normal.shape[1]}.")
-
-        x = F.pixel_shuffle(x, upscale_factor=8)
-        if normal.shape[-2:] != x.shape[-2:]:
-            normal = F.interpolate(normal, size=x.shape[-2:], mode="bilinear", align_corners=False)
-
-        x = torch.cat([x, normal], dim=1)
-        x = self.fused_conv(x)
-        x = F.pixel_unshuffle(x, downscale_factor=8)
+        if x.dim() != 4 or normal.dim() != 4:
+            raise ValueError("Expected x and normal to be 4D tensors.")
+        if x.shape[0] != normal.shape[0] or x.shape[-2:] != normal.shape[-2:]:
+            raise ValueError("Expected x and normal to have matching batch and spatial dimensions.")
+        x = torch.cat([x, normal], dim = 1)
+        x = self.channel_projection(x)
         return self.forward(x)
 
     def forward(self,x):
@@ -247,25 +264,6 @@ class DepthHead(nn.Module):
         
         x = F.normalize(x,p=2,dim=1)
         return x
-    
-
-class BaseLayer(nn.Module):
-    def __init__(self,in_channels,out_channels,kernel_size=3,stride=1,padding=1,bias=False,activation=True):
-        super().__init__()
-        if activation:
-            self.layer=nn.Sequential(
-                nn.Conv2d(in_channels,out_channels,kernel_size,stride,padding,bias=bias),
-                nn.BatchNorm2d(out_channels,affine=False),
-                nn.ReLU(inplace=True)
-            )
-        else:
-            self.layer=nn.Sequential(
-                nn.Conv2d(in_channels,out_channels,kernel_size,stride,padding,bias=bias),
-                nn.BatchNorm2d(out_channels,affine=False)
-            )
-        
-    def forward(self,x):
-        return self.layer(x)
 
 
 class LiftFeatSPModel(nn.Module):
@@ -399,31 +397,29 @@ class LiftFeatSPModel(nn.Module):
         
         # features fusion
         x = self.fuse_multi_features(x3,x4,x5)
-        
+        d_feats = self.depth_head(x)
+        normals_feat = self._unfold2d(d_feats, ws=8)
+
         # keypoint 
         keypoint_map = self.keypoint_head(x)
+
         # descriptor
         des_map = self.descriptor_head(x)
-        # # heatmap
-        # heatmap = self.heatmap_head(x)
-        
-        # import pdb;pdb.set_trace()
-        # depth
-        d_feats = self.depth_head(x)
-       
-        return des_map, keypoint_map, d_feats
+
+        return des_map, keypoint_map, d_feats, normals_feat
         # return des_map, keypoint_map, heatmap, d_feats
     
-    def forward2(self, descs, normals):
-        normals_feat=self._unfold2d(normals, ws=8)
-        normals_v=normals_feat.squeeze(0).permute(1,2,0).reshape(-1,normals_feat.shape[1])
-        descs_v=descs.squeeze(0).permute(1,2,0).reshape(-1,descs.shape[1])
+    def forward2(self, descs, normals_feat):
+        if descs.shape[0] != normals_feat.shape[0] or descs.shape[-2:] != normals_feat.shape[-2:]:
+            raise ValueError("Expected descs and normals_feat to have matching batch and spatial dimensions.")
+        normals_v=normals_feat.permute(0,2,3,1).reshape(-1,normals_feat.shape[1])
+        descs_v=descs.permute(0,2,3,1).reshape(-1,descs.shape[1])
         descs_refine = self.feature_boost(descs_v, normals_v)
         return descs_refine
     
     def forward(self,x):
-        M1,K1,D1=self.forward1(x)
-        descs_refine=self.forward2(M1,D1)
+        M1,K1,D1,N1=self.forward1(x)
+        descs_refine=self.forward2(M1,N1)
         return descs_refine,M1,K1,D1
     
 
@@ -435,7 +431,7 @@ if __name__ == "__main__":
     img=torch.from_numpy(img).unsqueeze(0).unsqueeze(0).float()/255.0
     img=img.cuda() if torch.cuda.is_available() else img
     liftfeat_sp=LiftFeatSPModel(modified_fusion_featureboost_config).to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
-    des_map, keypoint_map, d_feats=liftfeat_sp.forward1(img)
-    des_fine=liftfeat_sp.forward2(des_map,d_feats)
+    des_map, keypoint_map, d_feats, normals_feat=liftfeat_sp.forward1(img)
+    des_fine=liftfeat_sp.forward2(des_map,normals_feat)
     print(des_map.shape)
     

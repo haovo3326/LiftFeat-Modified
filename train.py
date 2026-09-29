@@ -283,8 +283,8 @@ class Trainer():
                 # import pdb;pdb.set_trace()
                 #Forward pass
                 # start=time.perf_counter()
-                feats1,kpts1,normals1 = self.net.forward1(imgs1_t)
-                feats2,kpts2,normals2 = self.net.forward1(imgs2_t)
+                feats1,kpts1,normals1,normals_feat1 = self.net.forward1(imgs1_t)
+                feats2,kpts2,normals2,normals_feat2 = self.net.forward1(imgs2_t)
                 
                 coordinates,fb_coordinates=[],[]
                 alike_kpts1,alike_kpts2=[],[]
@@ -300,8 +300,8 @@ class Trainer():
                     coordinate=self.net.fine_matcher(torch.cat([feat1,feat2],dim=-1))
                     coordinates.append(coordinate)
                     
-                    fb_feat1=self.net.forward2(feats1[b].unsqueeze(0),normals1[b].unsqueeze(0))
-                    fb_feat2=self.net.forward2(feats2[b].unsqueeze(0),normals2[b].unsqueeze(0))
+                    fb_feat1=self.net.forward2(feats1[b].unsqueeze(0),normals_feat1[b].unsqueeze(0))
+                    fb_feat2=self.net.forward2(feats2[b].unsqueeze(0),normals_feat2[b].unsqueeze(0))
                     
                     fb_coordinate=self.net.fine_matcher(torch.cat([fb_feat1,fb_feat2],dim=-1))
                     fb_coordinates.append(fb_coordinate)
