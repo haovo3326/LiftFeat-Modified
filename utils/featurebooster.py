@@ -209,11 +209,11 @@ class FeatureBooster(nn.Module):
     """
     3D GFL Ablation Study
     Variations          Fusion                      Attention Head      Residual    In Training
-    GFL0 (LiftFeat)     2x MLP                      Single              No                    
+    GFL0 (LiftFeat)     2x MLP                      Single              No          X          
     GFL1                1x1 Conv + Concat + MLP     Single              No          
     GFL2                2x MLP                      Multi               No          
     GFL3                2x MLP                      Single              Yes         
-    GFL4 (Aggregated)   1x1 Conv + Concat + MLP     Multi               Yes         X
+    GFL4 (Aggregated)   1x1 Conv + Concat + MLP     Multi               Yes         
     """
     def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
         if self.modified:
@@ -231,14 +231,14 @@ class FeatureBooster(nn.Module):
             desc = F.normalize(desc, dim=-1)
         return desc
 
-    def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
-        residual = desc
-        desc = self.desc_proj(desc)
-        normals = self.normal_proj(normals)
-        desc = torch.cat([desc, normals], dim=-1)
-        desc = self.feat_project(desc)
-        desc = self.attn_proj(desc)
-        return desc + residual
+    # def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
+    #     residual = desc
+    #     desc = self.desc_proj(desc)
+    #     normals = self.normal_proj(normals)
+    #     desc = torch.cat([desc, normals], dim=-1)
+    #     desc = self.feat_project(desc)
+    #     desc = self.attn_proj(desc)
+    #     return desc + residual
 
     def _forward_original(
         self,
@@ -249,18 +249,4 @@ class FeatureBooster(nn.Module):
         desc = self.denc(desc)
         desc = desc + self.nenc(normals)
         desc = self.attn_proj(desc)
-        return desc + residual
-
-
-if __name__ == "__main__":
-    from config import modified_fusion_featureboost_config, original_fusion_featureboost_config
-
-    modified_net = FeatureBooster(modified_fusion_featureboost_config)
-    descs = torch.randn([1900, 64])
-    normals = torch.randn([1900, 192])
-    descs_refine = modified_net(descs, normals)
-    print(descs_refine.shape)
-
-    original_net = FeatureBooster(original_fusion_featureboost_config)
-    descs_refine = original_net(descs, normals)
-    print(descs_refine.shape)
+        return desc
