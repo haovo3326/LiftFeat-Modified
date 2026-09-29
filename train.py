@@ -73,7 +73,7 @@ import glob
 
 from models.model import LiftFeatSPModel
 from loss.loss import LiftFeatLoss
-from utils.config import modified_fusion_featureboost_config, original_fusion_featureboost_config
+from utils.config import modified_fusion_featureboost_config
 from models.interpolator import InterpolateSparse2d
 from utils.depth_anything_wrapper import DepthAnythingExtractor
 from utils.alike_wrapper import ALikeExtractor
