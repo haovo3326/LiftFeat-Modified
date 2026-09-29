@@ -7,7 +7,7 @@ import cv2
 
 from models.model import LiftFeatSPModel
 from models.interpolator import InterpolateSparse2d
-from utils.config import modified_fusion_featureboost_config
+from utils.config import modified_fusion_featureboost_config, original_fusion_featureboost_config
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 

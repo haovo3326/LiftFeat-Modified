@@ -240,16 +240,16 @@ class FeatureBooster(nn.Module):
         desc = self.attn_proj(desc)
         return desc + residual
 
-    def _forward_original(
-        self,
-        desc: torch.Tensor,
-        normals: torch.Tensor,
-    ) -> torch.Tensor:
-        residual = desc
-        desc = self.denc(desc)
-        desc = desc + self.nenc(normals)
-        desc = self.attn_proj(desc)
-        return desc + residual
+    # def _forward_original(
+    #     self,
+    #     desc: torch.Tensor,
+    #     normals: torch.Tensor,
+    # ) -> torch.Tensor:
+    #     residual = desc
+    #     desc = self.denc(desc)
+    #     desc = desc + self.nenc(normals)
+    #     desc = self.attn_proj(desc)
+    #     return desc + residual
 
 
 if __name__ == "__main__":

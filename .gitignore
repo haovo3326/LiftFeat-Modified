@@ -6,6 +6,7 @@ data/megadepth_test_1500
 dataset/MegaDepth/
 output
 issues
+evaluation/weights
 .idea/
 __pycache__/
 *.py[cod]

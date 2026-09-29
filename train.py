@@ -99,7 +99,7 @@ class Trainer():
                  ckpt_save_path,
                  latest_ckpt_path,
                  model_name = 'LiftFeat',
-                 n_steps = 80_000, lr= 1e-4, gamma_steplr=0.7,
+                 n_steps = 160_000, lr= 3e-4, gamma_steplr=0.5,
                  training_res = (800, 608), device_num="0", dry_run = False,
                  save_ckpt_every = 2000, use_coord_loss = False):
         coco_batch_size = coco_batch_size if use_coco else 0
@@ -126,7 +126,7 @@ class Trainer():
         #Setup optimizer 
         self.steps = n_steps
         self.opt = optim.Adam(filter(lambda x: x.requires_grad, self.net.parameters()) , lr = lr)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=30_000, gamma=gamma_steplr)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=10_000, gamma=gamma_steplr)
 
         ##################### COCO INIT ##########################
         self.use_coco=use_coco
