@@ -22,7 +22,7 @@ def parse_arguments():
     parser.add_argument('--megadepth_root_path', type=str,
                         default='/kaggle/input/datasets',
                         help='Path to the MegaDepth dataset root directory.')
-    parser.add_argument('--megadepth_batch_size', type=int, default=4)
+    parser.add_argument('--megadepth_batch_size', type=int, default=6)
     
     # COCO20k dataset setting
     parser.add_argument('--use_coco',action='store_true')
@@ -36,12 +36,14 @@ def parse_arguments():
     parser.add_argument('--latest_ckpt_path', type=str,
                         default=None,
                         help='Path to a checkpoint to resume from. If omitted or missing, training starts from scratch.')
-    parser.add_argument('--n_steps', type=int, default=80_000,
-                        help='Number of training steps. Default is 80000.')
-    parser.add_argument('--lr', type=float, default=5e-5,
-                        help='Learning rate. Default is 0.0001.')
-    parser.add_argument('--gamma_steplr', type=float, default=0.7,
-                        help='Gamma value for StepLR scheduler. Default is 0.7.')
+    parser.add_argument('--n_steps', type=int, default=160_000,
+                        help='Number of training steps. Default is 160000.')
+    parser.add_argument('--scheduler_steps', type=int, default=10000,
+                        help='Step interval for the StepLR scheduler. Default is 10000.')
+    parser.add_argument('--lr', type=float, default=3e-4,
+                        help='Learning rate. Default is 0.0003.')
+    parser.add_argument('--gamma_steplr', type=float, default=0.5,
+                        help='Gamma value for StepLR scheduler. Default is 0.5.')
     parser.add_argument('--training_res', type=lambda s: tuple(map(int, s.split(','))),
                         default=(800, 608), help='Training resolution as width,height. Default is (800, 608).')
     parser.add_argument('--device_num', type=str, default='0',
@@ -53,6 +55,8 @@ def parse_arguments():
     parser.add_argument('--use_coord_loss',action='store_true',help='Enable coordinate loss')
 
     args = parser.parse_args()
+    if args.scheduler_steps <= 0:
+        parser.error('--scheduler_steps must be a positive integer.')
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.device_num
 
@@ -99,7 +103,7 @@ class Trainer():
                  ckpt_save_path,
                  latest_ckpt_path,
                  model_name = 'LiftFeat',
-                 n_steps = 160_000, lr= 3e-4, gamma_steplr=0.5,
+                 n_steps = 160_000, lr= 3e-4, scheduler_steps = 10000, gamma_steplr=0.5,
                  training_res = (800, 608), device_num="0", dry_run = False,
                  save_ckpt_every = 2000, use_coord_loss = False):
         coco_batch_size = coco_batch_size if use_coco else 0
@@ -126,7 +130,7 @@ class Trainer():
         #Setup optimizer 
         self.steps = n_steps
         self.opt = optim.Adam(filter(lambda x: x.requires_grad, self.net.parameters()) , lr = lr)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=10_000, gamma=gamma_steplr)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=scheduler_steps, gamma=gamma_steplr)
 
         ##################### COCO INIT ##########################
         self.use_coco=use_coco
@@ -201,6 +205,7 @@ class Trainer():
                 print('No checkpoint path provided. Starting training from scratch.')
             else:
                 print(f'Checkpoint not found: {ckpt_path}. Starting training from scratch.')
+        print(f'LR: {self.opt.param_groups[0]["lr"]}; StepLR step_size: {self.scheduler.step_size}; gamma: {self.scheduler.gamma}')
         ###########################################################################
         
     def generate_train_data(self):
@@ -435,6 +440,7 @@ if __name__ == '__main__':
         ckpt_save_path=args.ckpt_save_path,
         latest_ckpt_path=args.latest_ckpt_path,
         n_steps=args.n_steps,
+        scheduler_steps=args.scheduler_steps,
         lr=args.lr,
         gamma_steplr=args.gamma_steplr,
         training_res=args.training_res,
