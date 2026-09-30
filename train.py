@@ -156,7 +156,7 @@ class Trainer():
         self.use_megadepth=use_megadepth
         self.megadepth_batch_size=megadepth_batch_size
         if self.use_megadepth:
-            host_names = ["haovo3326", "thanhbih", "makago", "md090306"]
+            host_names = ["haovo3326", "thanhbih", "makago", "md090306", "dngcharles"]
 
             TRAIN_BASE_PATH = f"{megadepth_root_path}/{host_names[kaggle_host_id]}/megadepth-metadata/train_data/megadepth_indices"
             TRAINVAL_DATA_SOURCE = [
