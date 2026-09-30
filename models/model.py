@@ -167,7 +167,7 @@ class UpsampleLayer(nn.Module):
 class KeypointHead(nn.Module):
     def __init__(self,in_channels,out_channels):
         super().__init__()
-        self.channel_projection = nn.Conv2d(in_channels + 192, in_channels, kernel_size=1, bias=False)
+        # self.channel_projection = nn.Conv2d(in_channels + 192, in_channels, kernel_size=1, bias=False)
 
         self.layer1=BaseLayer(in_channels,32)
         self.layer2=BaseLayer(32,32)
@@ -178,14 +178,14 @@ class KeypointHead(nn.Module):
         self.conv=nn.Conv2d(128,out_channels,kernel_size=3, stride=1,padding=1)
         self.bn=nn.BatchNorm2d(65)
 
-    def pseudo_forward(self, x, normal):
-        if x.dim() != 4 or normal.dim() != 4:
-            raise ValueError("Expected x and normal to be 4D tensors.")
-        if x.shape[0] != normal.shape[0] or x.shape[-2:] != normal.shape[-2:]:
-            raise ValueError("Expected x and normal to have matching batch and spatial dimensions.")
-        x = torch.cat([x, normal], dim = 1)
-        x = self.channel_projection(x)
-        return self.forward(x)
+    # def pseudo_forward(self, x, normal):
+    #     if x.dim() != 4 or normal.dim() != 4:
+    #         raise ValueError("Expected x and normal to be 4D tensors.")
+    #     if x.shape[0] != normal.shape[0] or x.shape[-2:] != normal.shape[-2:]:
+    #         raise ValueError("Expected x and normal to have matching batch and spatial dimensions.")
+    #     x = torch.cat([x, normal], dim = 1)
+    #     x = self.channel_projection(x)
+    #     return self.forward(x)
 
     def forward(self,x):
         x=self.layer1(x)
