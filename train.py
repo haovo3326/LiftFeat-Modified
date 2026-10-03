@@ -7,78 +7,127 @@ import argparse
 import os
 import time
 import sys
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
 sys.path.append(os.path.dirname(__file__))
+
+
+KAGGLE_HOST_NAMES = ["haovo3326", "thanhbih", "makago", "md090306", "dngcharles", "teukun"]
+
+
+@dataclass
+class TrainerConfig:
+    name: str
+    platform: str
+    kaggle_host_id: int
+    use_megadepth: bool
+    megadepth_root_path: str
+    megadepth_batch_size: int
+    use_coco: bool
+    coco_root_path: str
+    coco_batch_size: int
+    ckpt_save_path: str
+    latest_ckpt_path: Optional[str]
+    n_steps: int
+    scheduler_steps: int
+    lr: float
+    gamma_steplr: float
+    training_res: Tuple[int, int]
+    device_num: str
+    dry_run: bool
+    save_ckpt_every: int
+    use_coord_loss: bool
+
+
+def parse_training_res(value):
+    try:
+        width, height = map(int, value.split(','))
+    except ValueError as ex:
+        raise argparse.ArgumentTypeError('Expected width,height, for example 800,608.') from ex
+    if width <= 0 or height <= 0:
+        raise argparse.ArgumentTypeError('Training resolution values must be positive.')
+    return width, height
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="LiftFeat training script.")
-    parser.add_argument('--name',type=str,default='LiftFeat',help='set process name')
 
-    # Kaggle host
-    parser.add_argument('--kaggle_host_id', type=int, default=0,
-                        help='Kaggle host ID used to select a host/user name for /kaggle/input paths.')
+    runtime = parser.add_argument_group('Runtime')
+    runtime.add_argument('--name', type=str, default='LiftFeat', help='Run name used for process title and checkpoints.')
+    runtime.add_argument('--device_num', type=str, default='0', help='CUDA device id to expose. Default is "0".')
+    runtime.add_argument('--dry_run', action='store_true', help='Run one mini-batch as a sanity check.')
 
-    # MegaDepth dataset setting
-    parser.add_argument('--use_megadepth',action='store_true')
-    parser.add_argument('--megadepth_root_path', type=str,
-                        default='/kaggle/input/datasets',
-                        help='Path to the MegaDepth dataset root directory.')
-    parser.add_argument('--megadepth_batch_size', type=int, default=6)
-    
-    # COCO20k dataset setting
-    parser.add_argument('--use_coco',action='store_true')
-    parser.add_argument('--coco_root_path', type=str, default='/home/yepeng_liu/code_python/dataset/coco_20k',
-                        help='Path to the COCO20k dataset root directory.')
-    parser.add_argument('--coco_batch_size',type=int,default=4)
+    platform = parser.add_argument_group('Platform')
+    platform.add_argument('--platform', type=str, default='Kaggle', choices=['Kaggle', 'Server'],
+                          help='Training platform. Kaggle uses split /kaggle/input dataset shards; Server uses one MegaDepth root.')
+    platform.add_argument('--kaggle_host_id', type=int, default=0,
+                          help='Kaggle host ID used to select a host/user name for /kaggle/input paths.')
 
-    parser.add_argument('--ckpt_save_path', type=str,
-                        default='/kaggle/working/trained_weights/megadepth',
-                        help='Path to save the checkpoints.')
-    parser.add_argument('--latest_ckpt_path', type=str,
-                        default=None,
-                        help='Path to a checkpoint to resume from. If omitted or missing, training starts from scratch.')
-    parser.add_argument('--n_steps', type=int, default=160_000,
-                        help='Number of training steps. Default is 160000.')
-    parser.add_argument('--scheduler_steps', type=int, default=10000,
-                        help='Step interval for the StepLR scheduler. Default is 10000.')
-    parser.add_argument('--lr', type=float, default=3e-4,
-                        help='Learning rate. Default is 0.0003.')
-    parser.add_argument('--gamma_steplr', type=float, default=0.5,
-                        help='Gamma value for StepLR scheduler. Default is 0.5.')
-    parser.add_argument('--training_res', type=lambda s: tuple(map(int, s.split(','))),
-                        default=(800, 608), help='Training resolution as width,height. Default is (800, 608).')
-    parser.add_argument('--device_num', type=str, default='0',
-                        help='Device number to use for training. Default is "0".')
-    parser.add_argument('--dry_run', action='store_true',
-                        help='If set, perform a dry run training with a mini-batch for sanity check.')
-    parser.add_argument('--save_ckpt_every', type=int, default=2000,
-                        help='Save checkpoints every N steps. Default is 2000.')
-    parser.add_argument('--use_coord_loss',action='store_true',help='Enable coordinate loss')
+    megadepth = parser.add_argument_group('MegaDepth dataset')
+    megadepth.add_argument('--use_megadepth', action='store_true')
+    megadepth.add_argument('--megadepth_root_path', type=str, default='/kaggle/input/datasets',
+                           help='MegaDepth root. Kaggle: /kaggle/input/datasets. Server: root containing train_data and MegaDepth_v1.')
+    megadepth.add_argument('--megadepth_batch_size', type=int, default=6)
+
+    coco = parser.add_argument_group('COCO20k dataset')
+    coco.add_argument('--use_coco', action='store_true')
+    coco.add_argument('--coco_root_path', type=str, default='/home/yepeng_liu/code_python/dataset/coco_20k',
+                      help='Path to the COCO20k dataset root directory.')
+    coco.add_argument('--coco_batch_size', type=int, default=4)
+
+    checkpoints = parser.add_argument_group('Checkpoints')
+    checkpoints.add_argument('--ckpt_save_path', type=str, default='/kaggle/working/trained_weights/megadepth',
+                             help='Path to save checkpoints and TensorBoard logs.')
+    checkpoints.add_argument('--latest_ckpt_path', type=str, default=None,
+                             help='Path to a checkpoint to resume from. If omitted or missing, training starts from scratch.')
+    checkpoints.add_argument('--save_ckpt_every', type=int, default=2000,
+                             help='Save checkpoints every N steps. Default is 2000.')
+
+    optimization = parser.add_argument_group('Optimization')
+    optimization.add_argument('--n_steps', type=int, default=160_000, help='Number of training steps.')
+    optimization.add_argument('--scheduler_steps', type=int, default=10000, help='Step interval for StepLR.')
+    optimization.add_argument('--lr', type=float, default=3e-4, help='Learning rate.')
+    optimization.add_argument('--gamma_steplr', type=float, default=0.5, help='Gamma value for StepLR.')
+    optimization.add_argument('--training_res', type=parse_training_res, default=(800, 608),
+                              help='Training resolution as width,height. Default is 800,608.')
+
+    losses = parser.add_argument_group('Losses')
+    losses.add_argument('--use_coord_loss', action='store_true', help='Enable coordinate loss.')
 
     args = parser.parse_args()
+    if args.n_steps <= 0:
+        parser.error('--n_steps must be a positive integer.')
     if args.scheduler_steps <= 0:
         parser.error('--scheduler_steps must be a positive integer.')
+    if args.save_ckpt_every <= 0:
+        parser.error('--save_ckpt_every must be a positive integer.')
+    if not args.use_megadepth and not args.use_coco:
+        parser.error('No training dataset enabled. Pass --use_megadepth and/or --use_coco.')
+    if args.use_megadepth and args.megadepth_batch_size <= 0:
+        parser.error('--megadepth_batch_size must be positive when --use_megadepth is enabled.')
+    if args.use_coco and args.coco_batch_size <= 0:
+        parser.error('--coco_batch_size must be positive when --use_coco is enabled.')
+    if args.platform == 'Kaggle' and not 0 <= args.kaggle_host_id < len(KAGGLE_HOST_NAMES):
+        parser.error(f'--kaggle_host_id must be between 0 and {len(KAGGLE_HOST_NAMES) - 1}.')
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.device_num
 
-    return args
+    return TrainerConfig(**vars(args))
 
-args = parse_arguments()
+config = parse_arguments()
 
 import torch
-from torch import nn
 from torch import optim
-import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 
-import numpy as np
 import tqdm
 import glob
 
 from models.model import LiftFeatSPModel
 from loss.loss import LiftFeatLoss
 from utils.config import modified_fusion_featureboost_config
-from models.interpolator import InterpolateSparse2d
 from utils.depth_anything_wrapper import DepthAnythingExtractor
 from utils.alike_wrapper import ALikeExtractor
 
@@ -97,51 +146,82 @@ def move_optimizer_state_to_device(optimizer, device):
                 state[key] = value.to(device)
 
 
-class Trainer():
-    def __init__(self, kaggle_host_id, megadepth_root_path, use_megadepth, megadepth_batch_size,
-                 coco_root_path, use_coco, coco_batch_size,
-                 ckpt_save_path,
-                 latest_ckpt_path,
-                 model_name = 'LiftFeat',
-                 n_steps = 160_000, lr= 3e-4, scheduler_steps = 10000, gamma_steplr=0.5,
-                 training_res = (800, 608), device_num="0", dry_run = False,
-                 save_ckpt_every = 2000, use_coord_loss = False):
-        coco_batch_size = coco_batch_size if use_coco else 0
-        print(f'MegeDepth: {use_megadepth}-{megadepth_batch_size}')
-        print(f'COCO20k: {use_coco}-{coco_batch_size}')
-        print(f'Coordinate loss: {use_coord_loss}')
-        if not use_megadepth and not use_coco:
-            raise RuntimeError('No training dataset enabled. Pass --use_megadepth and/or --use_coco.')
+def resolve_megadepth_paths(config):
+    if config.platform == "Kaggle":
+        host_name = KAGGLE_HOST_NAMES[config.kaggle_host_id]
+        train_base_path = f"{config.megadepth_root_path}/{host_name}/megadepth-metadata/train_data/megadepth_indices"
+        trainval_data_source = [
+            f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p1/MegaDepth_v1_p1",
+            f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p2/MegaDepth_v1_p2",
+            f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p3/MegaDepth_v1_p3",
+            f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p4/MegaDepth_v1_p4"
+        ]
+    else:
+        train_base_path = f"{config.megadepth_root_path}/train_data/megadepth_indices"
+        trainval_data_source = f"{config.megadepth_root_path}/MegaDepth_v1"
+
+    return trainval_data_source, f"{train_base_path}/scene_info_0.1_0.7"
+
+
+class Trainer:
+    def __init__(self, config):
+        self.config = config
+        self.steps = config.n_steps
+        self.dry_run = config.dry_run
+        self.save_ckpt_every = config.save_ckpt_every
+        self.ckpt_save_path = config.ckpt_save_path
+        self.model_name = config.name
+        self.use_coord_loss = config.use_coord_loss
+        self.use_coco = config.use_coco
+        self.coco_batch_size = config.coco_batch_size if config.use_coco else 0
+        self.use_megadepth = config.use_megadepth
+        self.megadepth_batch_size = config.megadepth_batch_size if config.use_megadepth else 0
+        self.current_step = 0
+
+        self.print_config()
+        self.setup_device()
+        self.setup_models()
+        self.setup_optimizer()
+        self.setup_coco()
+        self.setup_megadepth()
+        self.setup_logging()
+        self.load_checkpoint()
+
+    def print_config(self):
+        print(f'Platform: {self.config.platform}')
+        print(f'MegaDepth: {self.use_megadepth}-{self.megadepth_batch_size}')
+        print(f'COCO20k: {self.use_coco}-{self.coco_batch_size}')
+        print(f'Coordinate loss: {self.use_coord_loss}')
+
+    def setup_device(self):
         self.dev = torch.device ('cuda' if torch.cuda.is_available() else 'cpu')
         print(f'Training device: {self.dev}')
         if torch.cuda.is_available():
             print(f'GPU: {torch.cuda.get_device_name(0)}')
 
-        # training model
+    def setup_models(self):
         self.net = LiftFeatSPModel(modified_fusion_featureboost_config).to(self.dev)
-        self.loss_fn=LiftFeatLoss(self.dev,lam_descs=1,lam_kpts=2,lam_heatmap=1)
-        
-        # depth-anything model
-        self.depth_net=DepthAnythingExtractor('vits',self.dev,256)
-        
-        # alike model
-        self.alike_net=ALikeExtractor('alike-t',self.dev)
+        self.loss_fn = LiftFeatLoss(self.dev, lam_descs=1, lam_kpts=2, lam_heatmap=1)
+        self.depth_net = DepthAnythingExtractor('vits', self.dev, 256)
+        self.alike_net = ALikeExtractor('alike-t', self.dev)
 
-        #Setup optimizer 
-        self.steps = n_steps
-        self.opt = optim.Adam(filter(lambda x: x.requires_grad, self.net.parameters()) , lr = lr)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.opt, step_size=scheduler_steps, gamma=gamma_steplr)
+    def setup_optimizer(self):
+        self.opt = optim.Adam(filter(lambda x: x.requires_grad, self.net.parameters()), lr=self.config.lr)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+            self.opt,
+            step_size=self.config.scheduler_steps,
+            gamma=self.config.gamma_steplr
+        )
 
-        ##################### COCO INIT ##########################
-        self.use_coco=use_coco
-        self.coco_batch_size=coco_batch_size
+    def setup_coco(self):
         if self.use_coco:
-            self.augmentor=COCOAugmentor(
-                img_dir=coco_root_path,
-                device=self.dev,load_dataset=True,
+            self.augmentor = COCOAugmentor(
+                img_dir=self.config.coco_root_path,
+                device=self.dev,
+                load_dataset=True,
                 batch_size=self.coco_batch_size,
-                out_resolution=training_res,
-                warp_resolution=training_res,
+                out_resolution=self.config.training_res,
+                warp_resolution=self.config.training_res,
                 sides_crop=0.1,
                 max_num_imgs=3000,
                 num_test_imgs=5,
@@ -149,48 +229,35 @@ class Trainer():
                 geometric=True,
                 reload_step=4000
             )
-        ##################### COCO END #######################
 
-
-        ##################### MEGADEPTH INIT ##########################
-        self.use_megadepth=use_megadepth
-        self.megadepth_batch_size=megadepth_batch_size
+    def setup_megadepth(self):
         if self.use_megadepth:
-            host_names = ["haovo3326", "thanhbih", "makago", "md090306"]
-
-            TRAIN_BASE_PATH = f"{megadepth_root_path}/{host_names[kaggle_host_id]}/megadepth-metadata/train_data/megadepth_indices"
-            TRAINVAL_DATA_SOURCE = [
-                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p1/MegaDepth_v1_p1",
-                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p2/MegaDepth_v1_p2",
-                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p3/MegaDepth_v1_p3",
-                f"{megadepth_root_path}/kashiwaba/megadepth-v1-p4/MegaDepth_v1_p4"
-            ]
-
-            TRAIN_NPZ_ROOT = f"{TRAIN_BASE_PATH}/scene_info_0.1_0.7"
-
-            npz_paths = glob.glob(TRAIN_NPZ_ROOT + '/*.npz')[:]
+            trainval_data_source, train_npz_root = resolve_megadepth_paths(self.config)
+            npz_paths = glob.glob(train_npz_root + '/*.npz')[:]
             if len(npz_paths) == 0:
-                raise RuntimeError(f'No MegaDepth index files found in {TRAIN_NPZ_ROOT}')
-            megadepth_dataset = torch.utils.data.ConcatDataset( [MegaDepthDataset(root_dirs= TRAINVAL_DATA_SOURCE,
-                                                                                  npz_path = path) for path in tqdm.tqdm(npz_paths, desc="[MegaDepth] Loading metadata")] )
+                raise RuntimeError(f'No MegaDepth index files found in {train_npz_root}')
 
-            self.megadepth_dataloader = DataLoader(megadepth_dataset, batch_size=megadepth_batch_size, shuffle=True)
+            megadepth_dataset = torch.utils.data.ConcatDataset([
+                MegaDepthDataset(root_dirs=trainval_data_source, npz_path=path)
+                for path in tqdm.tqdm(npz_paths, desc="[MegaDepth] Loading metadata")
+            ])
+
+            self.megadepth_dataloader = DataLoader(
+                megadepth_dataset,
+                batch_size=self.megadepth_batch_size,
+                shuffle=True
+            )
             self.megadepth_data_iter = iter(self.megadepth_dataloader)
-        ##################### MEGADEPTH INIT END #######################
 
-        os.makedirs(ckpt_save_path, exist_ok=True)
-        os.makedirs(ckpt_save_path + '/logdir', exist_ok=True)
+    def setup_logging(self):
+        os.makedirs(self.ckpt_save_path, exist_ok=True)
+        os.makedirs(self.ckpt_save_path + '/logdir', exist_ok=True)
+        self.writer = SummaryWriter(
+            self.ckpt_save_path + f'/logdir/{self.model_name}_' + time.strftime("%Y_%m_%d-%H_%M_%S")
+        )
 
-        self.dry_run = dry_run
-        self.save_ckpt_every = save_ckpt_every
-        self.ckpt_save_path = ckpt_save_path
-        self.writer = SummaryWriter(ckpt_save_path + f'/logdir/{model_name}_' + time.strftime("%Y_%m_%d-%H_%M_%S"))
-        self.model_name = model_name
-        self.use_coord_loss = use_coord_loss
-        self.current_step = 0
-
-        ##################### LOAD CHECKPOINT / PRETRAINED WEIGHT ###################
-        ckpt_path = latest_ckpt_path
+    def load_checkpoint(self):
+        ckpt_path = self.config.latest_ckpt_path
         if ckpt_path is not None and os.path.isfile(ckpt_path):
             print(f'Loading checkpoint: {ckpt_path}')
             checkpoint = torch.load(ckpt_path, map_location='cpu')
@@ -206,7 +273,6 @@ class Trainer():
             else:
                 print(f'Checkpoint not found: {ckpt_path}. Starting training from scratch.')
         print(f'LR: {self.opt.param_groups[0]["lr"]}; StepLR step_size: {self.scheduler.step_size}; gamma: {self.scheduler.gamma}')
-        ###########################################################################
         
     def generate_train_data(self):
         imgs1_t,imgs2_t=[],[]
@@ -427,28 +493,7 @@ loss_normals.item()) )
 
 if __name__ == '__main__':
 
-    setproctitle.setproctitle(args.name)
-
-    trainer = Trainer(
-        kaggle_host_id=args.kaggle_host_id,
-        megadepth_root_path=args.megadepth_root_path, 
-        use_megadepth=args.use_megadepth,
-        megadepth_batch_size=args.megadepth_batch_size,
-        coco_root_path=args.coco_root_path, 
-        use_coco=args.use_coco,
-        coco_batch_size=args.coco_batch_size,
-        ckpt_save_path=args.ckpt_save_path,
-        latest_ckpt_path=args.latest_ckpt_path,
-        n_steps=args.n_steps,
-        scheduler_steps=args.scheduler_steps,
-        lr=args.lr,
-        gamma_steplr=args.gamma_steplr,
-        training_res=args.training_res,
-        device_num=args.device_num,
-        dry_run=args.dry_run,
-        save_ckpt_every=args.save_ckpt_every,
-        use_coord_loss=args.use_coord_loss
-    )
-
+    setproctitle.setproctitle(config.name)
+    trainer = Trainer(config)
     #The most fun part
     trainer.train()

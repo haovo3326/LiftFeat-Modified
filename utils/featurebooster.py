@@ -166,7 +166,6 @@ class FeatureBooster(nn.Module):
 
     def _init_modified(self) -> None:
         descriptor_dim = self.config["descriptor_dim"]
-        self.desc_proj = PointwiseProjection(descriptor_dim, descriptor_dim)
         self.normal_proj = PointwiseProjection(self.config["normal_dim"], descriptor_dim)
         self.feat_project = FeatureProjection(
             input_dim=descriptor_dim * 2,
@@ -213,7 +212,7 @@ class FeatureBooster(nn.Module):
     GFL1                1x1 Conv + Concat + MLP     Single              No          
     GFL2                2x MLP                      Multi               No          
     GFL3                2x MLP                      Single              Yes         
-    GFL4 (Aggregated)   1x1 Conv + Concat + MLP     Multi               Yes         X
+    GFL4 (Aggregated)   1x1 Conv + Concat + MLP     Multi               Yes         
     """
     def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
         if self.modified:
@@ -233,7 +232,6 @@ class FeatureBooster(nn.Module):
 
     def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
         residual = desc
-        desc = self.desc_proj(desc)
         normals = self.normal_proj(normals)
         desc = torch.cat([desc, normals], dim=-1)
         desc = self.feat_project(desc)
