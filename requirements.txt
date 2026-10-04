@@ -1,9 +1,7 @@
-# CUDA-enabled PyTorch wheels.
-# Change cu128 to another supported CUDA index if your driver/runtime requires it.
---extra-index-url https://download.pytorch.org/whl/cu126
-
 torch
 torchvision
+xformers
+
 numpy>=1.24,<2
 opencv-python-headless>=4.10
 tqdm>=4.66
