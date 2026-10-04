@@ -127,7 +127,7 @@ import glob
 
 from models.model import LiftFeatSPModel
 from loss.loss import LiftFeatLoss
-from utils.config import modified_fusion_featureboost_config
+from utils.config import original_fusion_featureboost_config
 from utils.depth_anything_wrapper import DepthAnythingExtractor
 from utils.alike_wrapper import ALikeExtractor
 
@@ -200,7 +200,7 @@ class Trainer:
             print(f'GPU: {torch.cuda.get_device_name(0)}')
 
     def setup_models(self):
-        self.net = LiftFeatSPModel(modified_fusion_featureboost_config).to(self.dev)
+        self.net = LiftFeatSPModel(original_fusion_featureboost_config).to(self.dev)
         self.loss_fn = LiftFeatLoss(self.dev, lam_descs=1, lam_kpts=2, lam_heatmap=1)
         self.depth_net = DepthAnythingExtractor('vits', self.dev, 256)
         self.alike_net = ALikeExtractor('alike-t', self.dev)
