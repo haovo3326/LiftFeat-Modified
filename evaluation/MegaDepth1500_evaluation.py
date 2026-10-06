@@ -80,7 +80,7 @@ class MegaDepth1500(Dataset):
         return data
 
 if _name_ == "_main_":
-    weights_dir = os.path.join(os.path.dirname(_file_), '../weights')
+    weights_dir = os.path.join(os.path.dirname(_file_), '../evaluation/weights/gfl0')
     all_weight_paths = list(Path(weights_dir).rglob('*.pth'))
 
     print(f"Weights directory: {weights_dir}")
