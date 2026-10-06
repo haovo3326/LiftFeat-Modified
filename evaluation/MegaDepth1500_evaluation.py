@@ -82,13 +82,6 @@ class MegaDepth1500(Dataset):
 if __name__ == "__main__":
     weights_dir = os.path.join(os.path.dirname(__file__), '../evaluation/weights/GFL0')
     all_weight_paths = list(Path(weights_dir).rglob('*.pth'))
-
-    print(f"Weights directory: {weights_dir}")
-    print(f"Found {len(all_weight_paths)} checkpoints")
-
-    if len(all_weight_paths) == 0:
-        raise RuntimeError(f"No .pth checkpoints found in {weights_dir}")
-
     all_results_summary = {}
 
     dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
