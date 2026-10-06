@@ -80,17 +80,29 @@ class MegaDepth1500(Dataset):
         return data
 
 if __name__ == "__main__":
-    weights=os.path.join(os.path.dirname(__file__),'../evaluation/weights/gfl4/LiftFeat_42000.pth.pth')
-    liftfeat=LiftFeat(weight=weights)
+    weights_dir = os.path.join(os.path.dirname(__file__), '../evaluation/weights/GFL0')
+    all_weight_paths = list(Path(weights_dir).rglob('*.pth'))
+    all_results_summary = {}
 
     dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    
+    CURRENT_DIR = os.getcwd()
+    TARGET_DIR = os.path.join(CURRENT_DIR, 'megaDepth1500_failure_case_analysis')
+    if not os.path.exists(TARGET_DIR):
+        os.makedirs(TARGET_DIR)
 
-    metrics = {}
-    R_errs = []
-    t_errs = []
-    inliers = []
-    results=[]
+    for weight_path in all_weight_paths:
+        weight_path_str = str(weight_path)
+        print(f"\n--- Evaluating {weight_path.name} ---")
+        
+        liftfeat = LiftFeat(weight=weight_path_str)
+
+        metrics = {}
+        R_errs = []
+        t_errs = []
+        inliers = []
+        results = []
 
     cur_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
