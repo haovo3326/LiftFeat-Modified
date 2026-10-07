@@ -104,19 +104,28 @@ if __name__ == "__main__":
         inliers = []
         results = []
 
-    cur_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        cur_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    for d in tqdm.tqdm(loader, desc="processing"):
-        error_infos = compute_pose_error(liftfeat.match_liftfeat,d)
-        results.append(error_infos)
+        for d in tqdm.tqdm(loader, desc=f"processing {weight_path.name}"):
+            error_infos = compute_pose_error(liftfeat.match_liftfeat,d)
+            results.append(error_infos)
 
-    print(f'\n==={cur_time}==={args.name}===')
-    d_err_auc, errors=compute_maa(results)
+        print(f'\n==={cur_time}==={args.name} ({weight_path.name})===')
+        d_err_auc, errors=compute_maa(results)
 
-    CURRENT_DIR = os.getcwd()
-    TARGET_DIR = os.path.join(CURRENT_DIR, 'megaDepth1500_failure_case_analysis')
-    with open(os.path.join(TARGET_DIR, 'errors.json'), 'w') as f:
-        json.dump(errors.tolist(), f)
+        # Save individual errors with the weight name so they don't overwrite
+        error_filename = f'errors_{weight_path.stem}.json'
+        with open(os.path.join(TARGET_DIR, error_filename), 'w') as f:
+            json.dump(errors.tolist(), f)
 
-    for s_k,s_v in d_err_auc.items():
-        print(f'{s_k}: {s_v*100}')
+        for s_k,s_v in d_err_auc.items():
+            print(f'{s_k}: {s_v*100}')
+            
+        all_results_summary[weight_path.name] = {k: v * 100 for k, v in d_err_auc.items()}
+
+    # Save the master summary JSON
+    summary_file = os.path.join(CURRENT_DIR, 'all_weights_summary.json')
+    with open(summary_file, 'w') as f:
+        json.dump(all_results_summary, f, indent=4)
+        
+    print(f"\nEvaluation complete! Summary saved to {summary_file}")
