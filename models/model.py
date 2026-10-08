@@ -16,11 +16,6 @@ import cv2
 import sys
 sys.path.append('/home/yepeng_liu/code_python/laiwenpeng/LiftFeat')
 from utils.featurebooster import FeatureBooster
-from utils.config import modified_fusion_featureboost_config
-
-# from models.model_dfb import LiftFeatModel
-# from models.interpolator import InterpolateSparse2d
-# from third_party.config import featureboost_config
 
 """
 foundational functions
@@ -421,17 +416,4 @@ class LiftFeatSPModel(nn.Module):
         M1,K1,D1,N1=self.forward1(x)
         descs_refine=self.forward2(M1,N1)
         return descs_refine,M1,K1,D1
-    
-
-if __name__ == "__main__":
-    img_path=os.path.join(os.path.dirname(__file__),'../assert/ref.jpg')
-    img=cv2.imread(img_path,cv2.IMREAD_GRAYSCALE)
-    img=cv2.resize(img,(800,608))
-    import pdb;pdb.set_trace()
-    img=torch.from_numpy(img).unsqueeze(0).unsqueeze(0).float()/255.0
-    img=img.cuda() if torch.cuda.is_available() else img
-    liftfeat_sp=LiftFeatSPModel(modified_fusion_featureboost_config).to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
-    des_map, keypoint_map, d_feats, normals_feat=liftfeat_sp.forward1(img)
-    des_fine=liftfeat_sp.forward2(des_map,normals_feat)
-    print(des_map.shape)
     

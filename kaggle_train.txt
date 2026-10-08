@@ -1,5 +1,5 @@
 // From scratch
-python train.py --name LiftFeat_MD_kaggle --platform Kaggle --kaggle_host_id 0 --use_megadepth --megadepth_root_path /kaggle/input/datasets --ckpt_save_path /kaggle/working/trained_weights/megadepth --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000
+python train.py --name GFLN --platform Kaggle --kaggle_host_id 0 --use_megadepth --megadepth_root_path /kaggle/input/datasets --ckpt_save_path /kaggle/working/trained_weights/megadepth --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000
 
 // From checkpoints
-python train.py --name LiftFeat_MD_kaggle --platform Kaggle --kaggle_host_id 0 --use_megadepth --megadepth_root_path /kaggle/input/datasets --ckpt_save_path /kaggle/working/trained_weights/megadepth --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000 --latest_ckpt_path /kaggle/working/LiftFeat-Modified/weights/GFLN_M.pth
+python train.py --name GFLN --platform Kaggle --kaggle_host_id 0 --use_megadepth --megadepth_root_path /kaggle/input/datasets --ckpt_save_path /kaggle/working/trained_weights/megadepth --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000 --latest_ckpt_path /kaggle/working/LiftFeat-Modified/weights/GFLN_M.pth

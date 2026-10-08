@@ -1,5 +1,5 @@
 // From scratch
-python train.py --name LiftFeat_MD_server --platform Server --use_megadepth --megadepth_root_path dataset/MegaDepth/phoenix/S6/zl548 --ckpt_save_path trained_weights/megadepth_server --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000
+python train.py --name GFLN --platform Server --use_megadepth --megadepth_root_path dataset/MegaDepth/phoenix/S6/zl548 --ckpt_save_path trained_weights/megadepth_server --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000
 
 // From checkpoints
-python train.py --name LiftFeat_MD_server --platform Server --use_megadepth --megadepth_root_path dataset/MegaDepth/phoenix/S6/zl548 --ckpt_save_path trained_weights/megadepth_server --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000 --latest_ckpt_path weights/GFLN_M.pth
+python train.py --name GFLN --platform Server --use_megadepth --megadepth_root_path dataset/MegaDepth/phoenix/S6/zl548 --ckpt_save_path trained_weights/megadepth_server --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000 --latest_ckpt_path weights/GFLN_M.pth
