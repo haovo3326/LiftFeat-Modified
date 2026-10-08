@@ -6,8 +6,6 @@ dataset/MegaDepth/
 output
 issues
 
-evaluation/megaDepth1500_failure_case_analysis
-
 trained_weights
 third_repos
 
