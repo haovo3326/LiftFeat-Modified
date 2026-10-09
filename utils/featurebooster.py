@@ -31,7 +31,7 @@ class NormalEncoder(nn.Module):
     """Encoding of normal geometry using MLP."""
     def __init__(self, normal_dim: int, feature_dim: int, layers: List[int]) -> None:
         super().__init__()
-        self.encoder = MLP_no_ReLU([normal_dim] + layers + [feature_dim])
+        self.encoder = MLP([normal_dim] + layers + [feature_dim])
 
     def forward(self, normals: torch.Tensor) -> torch.Tensor:
         return self.encoder(normals)
@@ -46,6 +46,13 @@ class DescriptorEncoder(nn.Module):
     def forward(self, desc: torch.Tensor) -> torch.Tensor:
         return desc + self.encoder(desc)
 
+class FeatureProjection(nn.Module):
+    def __init__(self, input_dim: int, output_dim: int, layers: List[int]):
+        super().__init__()
+        self.mlp = MLP([input_dim] + layers + [output_dim])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mlp(x)
 
 class AFTAttention(nn.Module):
     """Attention-free attention."""
@@ -116,40 +123,19 @@ class AttentionalNN(nn.Module):
         return desc
 
 
-class PointwiseProjection(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int):
-        super().__init__()
-        self.proj = nn.Conv1d(input_dim, output_dim, kernel_size=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x.t().unsqueeze(0)
-        x = self.proj(x)
-        return x.squeeze(0).t()
-
-
-class FeatureProjection(nn.Module):
-    """Project concatenated descriptor and normal features back to descriptor space."""
-    def __init__(self, input_dim: int, output_dim: int, layers: List[int]):
-        super().__init__()
-        self.mlp = MLP([input_dim] + layers + [output_dim])
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.mlp(x)
-
-
 class FeatureBooster(nn.Module):
     default_config = {
         "modified": False,
-        "descriptor_dim": 128,
+        "descriptor_dim": 64,
         "normal_dim": 192,
-        "normal_encoder": [32, 64, 128],
+        "normal_encoder": [128, 64, 64],
         "descriptor_encoder": [64, 64],
-        "feature_projection": [128, 64, 64],
+        "feature_projection": [128, 256, 128],
         "num_heads": 1,
         "Attentional_layers": 3,
         "last_activation": "relu",
         "l2_normalization": True,
-        "output_dim": 128,
+        "output_dim": 64,
     }
 
     def __init__(self, config):
@@ -166,9 +152,14 @@ class FeatureBooster(nn.Module):
 
     def _init_modified(self) -> None:
         descriptor_dim = self.config["descriptor_dim"]
-        self.normal_proj = PointwiseProjection(self.config["normal_dim"], descriptor_dim)
+        normal_dim = self.config["normal_dim"]
+        self.normal_proj = NormalEncoder(
+            normal_dim,
+            descriptor_dim,
+            self.config["normal_encoder"]
+        )
         self.feat_project = FeatureProjection(
-            input_dim=descriptor_dim * 2,
+            input_dim=descriptor_dim,
             output_dim=descriptor_dim,
             layers=self.config["feature_projection"],
         )
@@ -177,6 +168,7 @@ class FeatureBooster(nn.Module):
             layer_num=self.config["Attentional_layers"],
             num_heads=self.config["num_heads"],
         )
+        print(self.config)
 
     def _init_original(self) -> None:
         descriptor_dim = self.config["descriptor_dim"]
@@ -185,7 +177,10 @@ class FeatureBooster(nn.Module):
             descriptor_dim,
             self.config["normal_encoder"],
         )
-        self.denc = DescriptorEncoder(descriptor_dim, self.config["descriptor_encoder"])
+        self.denc = DescriptorEncoder(
+            descriptor_dim,
+            self.config["descriptor_encoder"]
+        )
         self.attn_proj = AttentionalNN(
             feature_dim=descriptor_dim,
             layer_num=self.config["Attentional_layers"],
@@ -211,8 +206,8 @@ class FeatureBooster(nn.Module):
     GFL0 (LiftFeat)     2x MLP                      Single              No                    
     GFL1                EMT + MLP                   Single              No          
     GFL2                2x MLP                      Multi               No          
-    GFL3                2x MLP                      Single              Yes         X
-    GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         
+    GFL3                2x MLP                      Single              Yes         
+    GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         X
     """
     def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
         if self.modified:
@@ -236,7 +231,7 @@ class FeatureBooster(nn.Module):
     #     desc = desc * torch.tanh(normals)
     #     desc = self.feat_project(desc)
     #     desc = self.attn_proj(desc)
-    #     return desc
+    #     return desc + residual
 
     def _forward_original(
         self,
