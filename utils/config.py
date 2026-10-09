@@ -1,7 +1,7 @@
 # modified_fusion_featureboost_config = {
 #     "modified": True,
 #     "normal_dim": 192,
-#     "feature_projection": [128, 64, 64],
+#     "feature_projection": [128, 256, 128],
 #     "descriptor_dim": 64,
 #     "num_heads": 1,
 #     "Attentional_layers": 3,
