@@ -206,8 +206,8 @@ class FeatureBooster(nn.Module):
     GFL0 (LiftFeat)     2x MLP                      Single              No                    
     GFL1                EMT + MLP                   Single              No          
     GFL2                2x MLP                      Multi               No          
-    GFL3                2x MLP                      Single              Yes         
-    GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         X
+    GFL3                2x MLP                      Single              Yes         X
+    GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         
     """
     def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
         if self.modified:
