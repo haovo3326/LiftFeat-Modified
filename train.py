@@ -36,6 +36,8 @@ class TrainerConfig:
     training_res: Tuple[int, int]
     device_num: str
     dry_run: bool
+    profile: bool
+    profile_steps: int
     save_ckpt_every: int
     use_coord_loss: bool
 
@@ -57,6 +59,8 @@ def parse_arguments():
     runtime.add_argument('--name', type=str, default='LiftFeat', help='Run name used for process title and checkpoints.')
     runtime.add_argument('--device_num', type=str, default='0', help='CUDA device id to expose. Default is "0".')
     runtime.add_argument('--dry_run', action='store_true', help='Run one mini-batch as a sanity check.')
+    runtime.add_argument('--profile', action='store_true', help='Profile training steps with torch.profiler and export trace.')
+    runtime.add_argument('--profile_steps', type=int, default=50, help='Number of active steps to profile. Default is 50.')
 
     platform = parser.add_argument_group('Platform')
     platform.add_argument('--platform', type=str, default='Kaggle', choices=['Kaggle', 'Server'],
@@ -168,6 +172,8 @@ class Trainer:
         self.config = config
         self.steps = config.n_steps
         self.dry_run = config.dry_run
+        self.profile = config.profile
+        self.profile_steps = config.profile_steps
         self.save_ckpt_every = config.save_ckpt_every
         self.ckpt_save_path = config.ckpt_save_path
         self.model_name = config.name
@@ -192,6 +198,8 @@ class Trainer:
         print(f'MegaDepth: {self.use_megadepth}-{self.megadepth_batch_size}')
         print(f'COCO20k: {self.use_coco}-{self.coco_batch_size}')
         print(f'Coordinate loss: {self.use_coord_loss}')
+        if self.profile:
+            print(f'Profiler: enabled ({self.profile_steps} steps)')
 
     def setup_device(self):
         self.dev = torch.device ('cuda' if torch.cuda.is_available() else 'cpu')
@@ -335,6 +343,30 @@ class Trainer:
     def train(self):
         self.net.train()
 
+        prof = None
+        prof_wait = 2
+        prof_warmup = 3
+        prof_active = self.profile_steps
+        prof_total_steps = prof_wait + prof_warmup + prof_active
+        successful_steps = 0
+        active_start_time = None
+
+        if self.profile:
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            if torch.cuda.is_available():
+                activities.append(torch.profiler.ProfilerActivity.CUDA)
+            trace_dir = os.path.join(self.ckpt_save_path, 'profiler_trace')
+            os.makedirs(trace_dir, exist_ok=True)
+            prof = torch.profiler.profile(
+                activities=activities,
+                schedule=torch.profiler.schedule(wait=prof_wait, warmup=prof_warmup, active=prof_active, repeat=1),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir),
+                record_shapes=False,
+                profile_memory=True,
+                with_stack=False
+            )
+            prof.start()
+
         with tqdm.tqdm(total=self.steps, initial=self.current_step) as pbar:
             for i in range(self.current_step, self.steps):
                 # import pdb;pdb.set_trace()
@@ -352,8 +384,11 @@ class Trainer:
                     continue
 
                 # import pdb;pdb.set_trace()
-                #Forward pass
-                # start=time.perf_counter()
+                # Forward pass
+                step_start_time = time.perf_counter()
+                if torch.cuda.is_available():
+                    torch.cuda.reset_peak_memory_stats(self.dev)
+
                 feats1,kpts1,normals1,normals_feat1 = self.net.forward1(imgs1_t)
                 feats2,kpts2,normals2,normals_feat2 = self.net.forward1(imgs2_t)
                 
@@ -488,6 +523,49 @@ loss_normals.item()) )
                 self.writer.add_scalar('Loss/fb_coordinates', loss_fb_coordinates.item(), i)
                 self.writer.add_scalar('Loss/kpts', loss_kpts.item(), i)
                 self.writer.add_scalar('Loss/normals', loss_normals.item(), i)
+
+                if self.dry_run:
+                    step_time = time.perf_counter() - step_start_time
+                    peak_vram = (
+                        f"{torch.cuda.max_memory_allocated(self.dev) / (1024 ** 2):.2f} MB"
+                        if torch.cuda.is_available()
+                        else "N/A (CPU)"
+                    )
+                    print(f"\n[Dry Run] Completed 1 successful step. Step time: {step_time:.4f}s | Peak VRAM: {peak_vram}")
+                    self.writer.flush()
+                    return
+
+                successful_steps += 1
+                if self.profile and prof is not None:
+                    if successful_steps == (prof_wait + prof_warmup):
+                        active_start_time = time.perf_counter()
+                    prof.step()
+                    if successful_steps >= prof_total_steps:
+                        active_end_time = time.perf_counter()
+                        prof.stop()
+                        active_wall_s = (active_end_time - active_start_time) if active_start_time else 1.0
+                        sec_per_step = active_wall_s / prof_active
+                        key_avgs = prof.key_averages()
+                        sort_by = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total"
+                        print(f"\n[Profiler] === Top Operations (Profiled {prof_active} steps) ===")
+                        print(key_avgs.table(sort_by=sort_by, row_limit=15))
+
+                        trace_dir = os.path.join(self.ckpt_save_path, 'profiler_trace')
+                        print(f"\n[Profiler Summary]")
+                        print(f"Active Profiling Wall Time : {active_wall_s:.2f} s")
+                        print(f"Average Step Time          : {sec_per_step:.4f} s/step")
+                        if torch.cuda.is_available():
+                            gpu_kernel_time_s = sum(
+                                getattr(evt, 'self_device_time_total', getattr(evt, 'self_cuda_time_total', 0))
+                                for evt in key_avgs
+                            ) / 1e6
+                            gpu_busy_pct = min(100.0, (gpu_kernel_time_s / active_wall_s) * 100.0)
+                            gpu_idle_pct = max(0.0, 100.0 - gpu_busy_pct)
+                            print(f"GPU Kernel Time            : {gpu_kernel_time_s:.2f} s ({gpu_busy_pct:.1f}% busy)")
+                            print(f"GPU Idle Time              : {gpu_idle_pct:.1f}%")
+                        print(f"Profiler trace exported to : {trace_dir}")
+                        self.writer.flush()
+                        return
 
 
 
