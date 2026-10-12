@@ -153,18 +153,61 @@ def move_optimizer_state_to_device(optimizer, device):
 def resolve_megadepth_paths(config):
     if config.platform == "Kaggle":
         host_name = KAGGLE_HOST_NAMES[config.kaggle_host_id]
-        train_base_path = f"{config.megadepth_root_path}/{host_name}/megadepth-metadata/train_data/megadepth_indices"
+        configured_npz = f"{config.megadepth_root_path}/{host_name}/megadepth-metadata/train_data/megadepth_indices/scene_info_0.1_0.7"
+        
+        candidates = [
+            configured_npz,
+            f"{config.megadepth_root_path}/megadepth-metadata/train_data/megadepth_indices/scene_info_0.1_0.7",
+            "/kaggle/input/megadepth-metadata/train_data/megadepth_indices/scene_info_0.1_0.7",
+            f"/kaggle/input/{host_name}/megadepth-metadata/train_data/megadepth_indices/scene_info_0.1_0.7",
+            "/kaggle/input/megadepth-indices/scene_info_0.1_0.7"
+        ]
+
+        npz_root = None
+        for cand in candidates:
+            if os.path.isdir(cand) and len(glob.glob(cand + '/*.npz')) > 0:
+                npz_root = cand
+                print(f"[MegaDepth] Using metadata directory: {npz_root}")
+                break
+
+        if npz_root is None:
+            found = glob.glob('/kaggle/input/**/scene_info_0.1_0.7', recursive=True)
+            for f in found:
+                if len(glob.glob(f + '/*.npz')) > 0:
+                    npz_root = f
+                    print(f"[MegaDepth] Auto-discovered metadata directory: {npz_root}")
+                    break
+
+        if npz_root is None:
+            npz_root = configured_npz
+
+        # Image sources
         trainval_data_source = [
             f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p1/MegaDepth_v1_p1",
             f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p2/MegaDepth_v1_p2",
             f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p3/MegaDepth_v1_p3",
             f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p4/MegaDepth_v1_p4"
         ]
+        direct_sources = [
+            f"/kaggle/input/megadepth-v1-p{i}/MegaDepth_v1_p{i}" for i in range(1, 5)
+        ]
+
+        valid_sources = [p for p in trainval_data_source if os.path.exists(p)]
+        if not valid_sources:
+            valid_sources = [p for p in direct_sources if os.path.exists(p)]
+        if not valid_sources:
+            found_parts = glob.glob('/kaggle/input/**/MegaDepth_v1_p*', recursive=True)
+            if found_parts:
+                valid_sources = [p for p in found_parts if os.path.isdir(p)]
+                print(f"[MegaDepth] Auto-discovered image sources: {valid_sources}")
+            else:
+                valid_sources = trainval_data_source
+
+        return valid_sources, npz_root
     else:
         train_base_path = f"{config.megadepth_root_path}/train_data/megadepth_indices"
         trainval_data_source = f"{config.megadepth_root_path}/MegaDepth_v1"
-
-    return trainval_data_source, f"{train_base_path}/scene_info_0.1_0.7"
+        return trainval_data_source, f"{train_base_path}/scene_info_0.1_0.7"
 
 
 class Trainer:
@@ -243,7 +286,14 @@ class Trainer:
             trainval_data_source, train_npz_root = resolve_megadepth_paths(self.config)
             npz_paths = glob.glob(train_npz_root + '/*.npz')[:]
             if len(npz_paths) == 0:
-                raise RuntimeError(f'No MegaDepth index files found in {train_npz_root}')
+                kaggle_inputs = os.listdir('/kaggle/input') if os.path.exists('/kaggle/input') else []
+                raise RuntimeError(
+                    f"No MegaDepth index files (.npz) found in: {train_npz_root}\n"
+                    f"Platform: {self.config.platform}\n"
+                    f"Contents of /kaggle/input: {kaggle_inputs}\n"
+                    f"Tip: Ensure the MegaDepth metadata dataset is added to this Kaggle notebook, "
+                    f"or specify --megadepth_root_path."
+                )
 
             megadepth_dataset = torch.utils.data.ConcatDataset([
                 MegaDepthDataset(root_dirs=trainval_data_source, npz_path=path)
