@@ -364,7 +364,6 @@ class Trainer:
                 
                 # --- Teacher Extraction (No Autograd Tracking) ---
                 with torch.no_grad():
-                    alike_kpts1, alike_kpts2 = [], []
                     DA_normals1, DA_normals2 = [], []
                     
                     for b in range(len(imgs1_np)):
@@ -373,14 +372,8 @@ class Trainer:
                         DA_normals1.append(megadepth_norm1)
                         DA_normals2.append(megadepth_norm2)
                         
-                    for b in range(imgs1_t.shape[0]):
-                        # Avoid tensor tracking to offload host memory copy latency
-                        img1 = imgs1_t[b].permute(1,2,0).expand(-1,-1,3).detach().cpu().numpy() * 255
-                        img2 = imgs2_t[b].permute(1,2,0).expand(-1,-1,3).detach().cpu().numpy() * 255
-                        alike_kpt1 = torch.tensor(self.alike_net.extract_alike_kpts(img1), device=self.dev)
-                        alike_kpt2 = torch.tensor(self.alike_net.extract_alike_kpts(img2), device=self.dev)
-                        alike_kpts1.append(alike_kpt1)
-                        alike_kpts2.append(alike_kpt2)
+                    alike_kpts1 = self.alike_net.extract_alike_kpts_from_tensor(imgs1_t)
+                    alike_kpts2 = self.alike_net.extract_alike_kpts_from_tensor(imgs2_t)
 
                 # --- Student Forward Pass w/ AMP context ---
                 with torch.cuda.amp.autocast(enabled=self.config.amp):

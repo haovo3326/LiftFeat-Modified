@@ -21,9 +21,7 @@ from alike import ALike
 import cv2
 import numpy as np
 
-import pdb
 
-dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 configs = {
     'alike-t': {'c1': 8, 'c2': 16, 'c3': 32, 'c4': 64, 'dim': 64, 'single_head': True, 'radius': 2,
@@ -38,14 +36,38 @@ configs = {
 
 
 class ALikeExtractor(nn.Module):
-    def __init__(self,model_type,device) -> None:
+    def __init__(self, model_type, device) -> None:
         super().__init__()
-        self.net=ALike(**configs[model_type],device=device,top_k=4096,scores_th=0.1,n_limit=8000)
-        
-    
+        self.device = device
+        self.net = ALike(**configs[model_type], device=device, top_k=4096, scores_th=0.1, n_limit=8000)
+
     @torch.inference_mode()
-    def extract_alike_kpts(self,img):
-        pred0=self.net(img,sub_pixel=True)
+    def extract_alike_kpts(self, img):
+        pred0 = self.net(img, sub_pixel=True)
         return pred0['keypoints']
+
+    @torch.inference_mode()
+    def extract_alike_kpts_from_tensor(self, image: torch.Tensor, sub_pixel: bool = True):
+        """
+        Extracts keypoints directly from a PyTorch tensor on GPU without CPU/numpy roundtrips.
+        Args:
+            image: Tensor of shape (B, 1, H, W) or (B, 3, H, W) or (3, H, W), float in [0.0, 1.0].
+        Returns:
+            list of B Tensors, each of shape (N_i, 2) on the same GPU device.
+        """
+        if image.dim() == 3:
+            image = image.unsqueeze(0)
+        if image.shape[1] == 1:
+            image = image.expand(-1, 3, -1, -1)
+        if not image.is_contiguous():
+            image = image.contiguous()
+
+        B, _, H, W = image.shape
+        descriptor_map, scores_map = self.net.extract_dense_map(image)
+        keypoints, _, _, _ = self.net.dkd(scores_map, descriptor_map, sub_pixel=sub_pixel)
+
+        scale = image.new_tensor([[W - 1, H - 1]])
+        kpts_scaled = [((kpt + 1) / 2) * scale for kpt in keypoints]
+        return kpts_scaled
 
 
