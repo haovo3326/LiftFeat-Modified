@@ -387,34 +387,21 @@ class Trainer:
                     feats1, kpts1, normals1, normals_feat1 = self.net.forward1(imgs1_t)
                     feats2, kpts2, normals2, normals_feat2 = self.net.forward1(imgs2_t)
                     
-                    coordinates, fb_coordinates = None, None
-                    fb_feats1, fb_feats2 = [], []
-                    
-                    if self.use_coord_loss:
-                        coordinates, fb_coordinates = [], []
-                    
-                    for b in range(feats1.shape[0]):
-                        fb_feat1 = self.net.forward2(feats1[b].unsqueeze(0), normals_feat1[b].unsqueeze(0))
-                        fb_feat2 = self.net.forward2(feats2[b].unsqueeze(0), normals_feat2[b].unsqueeze(0))
-                        fb_feats1.append(fb_feat1.unsqueeze(0))
-                        fb_feats2.append(fb_feat2.unsqueeze(0))
-                        
-                        # Only compute fine_matcher outputs when coordinate loss is explicitly activated
-                        if self.use_coord_loss:
-                            feat1 = feats1[b].permute(1,2,0).reshape(-1, feats1.shape[1])
-                            feat2 = feats2[b].permute(1,2,0).reshape(-1, feats2.shape[1])
-                            coordinates.append(self.net.fine_matcher(torch.cat([feat1, feat2], dim=-1)))
-                            
-                            fb_f1 = fb_feat1.squeeze(0).permute(1,2,0).reshape(-1, fb_feat1.shape[1])
-                            fb_f2 = fb_feat2.squeeze(0).permute(1,2,0).reshape(-1, fb_feat2.shape[1])
-                            fb_coordinates.append(self.net.fine_matcher(torch.cat([fb_f1, fb_f2], dim=-1)))
+                    fb_feats1 = self.net.forward2(feats1, normals_feat1).reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0, 3, 1, 2)
+                    fb_feats2 = self.net.forward2(feats2, normals_feat2).reshape(feats2.shape[0], feats2.shape[2], feats2.shape[3], -1).permute(0, 3, 1, 2)
 
-                    fb_feats1 = torch.cat(fb_feats1, dim=0).reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0,3,1,2)
-                    fb_feats2 = torch.cat(fb_feats2, dim=0).reshape(feats2.shape[0], feats2.shape[2], feats2.shape[3], -1).permute(0,3,1,2)
-                    
                     if self.use_coord_loss:
-                        coordinates = torch.cat(coordinates, dim=0).reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0,3,1,2)
-                        fb_coordinates = torch.cat(fb_coordinates, dim=0).reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0,3,1,2)
+                        feat1 = feats1.permute(0, 2, 3, 1).reshape(-1, feats1.shape[1])
+                        feat2 = feats2.permute(0, 2, 3, 1).reshape(-1, feats2.shape[1])
+                        coordinates = self.net.fine_matcher(torch.cat([feat1, feat2], dim=-1))
+                        coordinates = coordinates.reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0, 3, 1, 2)
+
+                        fb_f1 = fb_feats1.permute(0, 2, 3, 1).reshape(-1, fb_feats1.shape[1])
+                        fb_f2 = fb_feats2.permute(0, 2, 3, 1).reshape(-1, fb_feats2.shape[1])
+                        fb_coordinates = self.net.fine_matcher(torch.cat([fb_f1, fb_f2], dim=-1))
+                        fb_coordinates = fb_coordinates.reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0, 3, 1, 2)
+                    else:
+                        coordinates, fb_coordinates = None, None
 
                     loss_info = self.loss_fn(
                         feats1, fb_feats1, kpts1, normals1,

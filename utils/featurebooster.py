@@ -63,23 +63,27 @@ class AFTAttention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
+        is_2d = (x.dim() == 2)
+        if is_2d:
+            x = x.unsqueeze(0)
 
-        n_tokens, dim = x.shape
+        B, N, dim = x.shape
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
 
-        q = q.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
-        k = k.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
-        v = v.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
+        q = q.view(B, N, self.n_heads, self.d_k).permute(0, 2, 1, 3)
+        k = k.view(B, N, self.n_heads, self.d_k).permute(0, 2, 1, 3)
+        v = v.view(B, N, self.n_heads, self.d_k).permute(0, 2, 1, 3)
 
         k = torch.softmax(k, dim=-2)
         kv = (k * v).sum(dim=-2, keepdim=True)
         x = q * kv
 
-        x = x.transpose(0, 1).reshape(n_tokens, dim)
+        x = x.permute(0, 2, 1, 3).reshape(B, N, dim)
         x = self.proj(x)
-        return x + residual
+        out = x + residual
+        return out.squeeze(0) if is_2d else out
 
 
 class PositionwiseFeedForward(nn.Module):
@@ -122,9 +126,12 @@ class PointwiseProjection(nn.Module):
         self.proj = nn.Conv1d(input_dim, output_dim, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x.t().unsqueeze(0)
-        x = self.proj(x)
-        return x.squeeze(0).t()
+        if x.dim() == 2:
+            x = x.t().unsqueeze(0)
+            x = self.proj(x)
+            return x.squeeze(0).t()
+        # 3D: (B, N, C) -> Conv1d expects (B, C, N)
+        return self.proj(x.transpose(1, 2)).transpose(1, 2)
 
 
 class FeatureProjection(nn.Module):
