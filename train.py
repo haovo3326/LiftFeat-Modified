@@ -504,8 +504,8 @@ class Trainer:
                     torch.save(save_dict, tmp_path)
                     os.replace(tmp_path, final_path)
 
-            if self.dry_run:
-                break
+                if self.dry_run:
+                    break
 
 
 if __name__ == '__main__':
