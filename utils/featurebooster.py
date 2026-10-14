@@ -199,8 +199,8 @@ class FeatureBooster(nn.Module):
     Variations          Fusion                      Attention Head      Residual    In Training
     GFL0 (LiftFeat)     2x MLP                      Single              No                    
     GFL1                EMT + MLP                   Single              No          
-    GFL2                2x MLP                      Multi               No          X
-    GFL3                2x MLP                      Single              Yes         
+    GFL2                2x MLP                      Multi               No          
+    GFL3                2x MLP                      Single              Yes         X
     GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         
     """
     def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
@@ -236,4 +236,4 @@ class FeatureBooster(nn.Module):
         desc = self.denc(desc)
         desc = desc + self.nenc(normals)
         desc = self.attn_proj(desc)
-        return desc
+        return desc + residual
