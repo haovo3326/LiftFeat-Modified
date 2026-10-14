@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 def MLP(channels: List[int], do_bn: bool = False) -> nn.Module:
     """Multi-layer perceptron."""
     layers = []
@@ -15,17 +14,6 @@ def MLP(channels: List[int], do_bn: bool = False) -> nn.Module:
                 layers.append(nn.BatchNorm1d(channels[i]))
             layers.append(nn.ReLU())
     return nn.Sequential(*layers)
-
-
-def MLP_no_ReLU(channels: List[int], do_bn: bool = False) -> nn.Module:
-    """Multi-layer perceptron without hidden ReLU activations."""
-    layers = []
-    for i in range(1, len(channels)):
-        layers.append(nn.Linear(channels[i - 1], channels[i]))
-        if i < len(channels) - 1 and do_bn:
-            layers.append(nn.BatchNorm1d(channels[i]))
-    return nn.Sequential(*layers)
-
 
 class NormalEncoder(nn.Module):
     """Encoding of normal geometry using MLP."""
@@ -46,13 +34,6 @@ class DescriptorEncoder(nn.Module):
     def forward(self, desc: torch.Tensor) -> torch.Tensor:
         return desc + self.encoder(desc)
 
-class FeatureProjection(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, layers: List[int]):
-        super().__init__()
-        self.mlp = MLP([input_dim] + layers + [output_dim])
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.mlp(x)
 
 class AFTAttention(nn.Module):
     """Attention-free attention."""
@@ -70,23 +51,27 @@ class AFTAttention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
+        is_2d = (x.dim() == 2)
+        if is_2d:
+            x = x.unsqueeze(0)
 
-        n_tokens, dim = x.shape
+        B, N, dim = x.shape
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
 
-        q = q.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
-        k = k.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
-        v = v.view(n_tokens, self.n_heads, self.d_k).transpose(0, 1)
+        q = q.view(B, N, self.n_heads, self.d_k).permute(0, 2, 1, 3)
+        k = k.view(B, N, self.n_heads, self.d_k).permute(0, 2, 1, 3)
+        v = v.view(B, N, self.n_heads, self.d_k).permute(0, 2, 1, 3)
 
         k = torch.softmax(k, dim=-2)
         kv = (k * v).sum(dim=-2, keepdim=True)
         x = q * kv
 
-        x = x.transpose(0, 1).reshape(n_tokens, dim)
+        x = x.permute(0, 2, 1, 3).reshape(B, N, dim)
         x = self.proj(x)
-        return x + residual
+        out = x + residual
+        return out.squeeze(0) if is_2d else out
 
 
 class PositionwiseFeedForward(nn.Module):
@@ -121,6 +106,15 @@ class AttentionalNN(nn.Module):
         for layer in self.layers:
             desc = layer(desc)
         return desc
+
+class FeatureProjection(nn.Module):
+    """Project concatenated descriptor and normal features back to descriptor space."""
+    def __init__(self, input_dim: int, output_dim: int, layers: List[int]):
+        super().__init__()
+        self.mlp = MLP([input_dim] + layers + [output_dim])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mlp(x)
 
 
 class FeatureBooster(nn.Module):

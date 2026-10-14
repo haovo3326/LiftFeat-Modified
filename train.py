@@ -12,9 +12,7 @@ from typing import Optional, Tuple
 
 sys.path.append(os.path.dirname(__file__))
 
-
 KAGGLE_HOST_NAMES = ["haovo3326", "thanhbih", "makago", "md090306", "dngcharles", "teukun"]
-
 
 @dataclass
 class TrainerConfig:
@@ -38,6 +36,10 @@ class TrainerConfig:
     dry_run: bool
     save_ckpt_every: int
     use_coord_loss: bool
+    num_workers: int
+    amp: bool
+    log_every: int
+    max_load_failures: int
 
 
 def parse_training_res(value):
@@ -57,6 +59,9 @@ def parse_arguments():
     runtime.add_argument('--name', type=str, default='LiftFeat', help='Run name used for process title and checkpoints.')
     runtime.add_argument('--device_num', type=str, default='0', help='CUDA device id to expose. Default is "0".')
     runtime.add_argument('--dry_run', action='store_true', help='Run one mini-batch as a sanity check.')
+    runtime.add_argument('--num_workers', type=int, default=2, help='DataLoader workers per dataset.')
+    runtime.add_argument('--log_every', type=int, default=50, help='Log to TensorBoard every N steps.')
+    runtime.add_argument('--max_load_failures', type=int, default=50, help='Max consecutive corrupted batches allowed.')
 
     platform = parser.add_argument_group('Platform')
     platform.add_argument('--platform', type=str, default='Kaggle', choices=['Kaggle', 'Server'],
@@ -66,53 +71,33 @@ def parse_arguments():
 
     megadepth = parser.add_argument_group('MegaDepth dataset')
     megadepth.add_argument('--use_megadepth', action='store_true')
-    megadepth.add_argument('--megadepth_root_path', type=str, default='/kaggle/input/datasets',
-                           help='MegaDepth root. Kaggle: /kaggle/input/datasets. Server: root containing train_data and MegaDepth_v1.')
+    megadepth.add_argument('--megadepth_root_path', type=str, default='/kaggle/input/datasets')
     megadepth.add_argument('--megadepth_batch_size', type=int, default=6)
 
     coco = parser.add_argument_group('COCO20k dataset')
     coco.add_argument('--use_coco', action='store_true')
-    coco.add_argument('--coco_root_path', type=str, default='/home/yepeng_liu/code_python/dataset/coco_20k',
-                      help='Path to the COCO20k dataset root directory.')
+    coco.add_argument('--coco_root_path', type=str, default='/home/yepeng_liu/code_python/dataset/coco_20k')
     coco.add_argument('--coco_batch_size', type=int, default=4)
 
     checkpoints = parser.add_argument_group('Checkpoints')
-    checkpoints.add_argument('--ckpt_save_path', type=str, default='/kaggle/working/trained_weights/megadepth',
-                             help='Path to save checkpoints and TensorBoard logs.')
-    checkpoints.add_argument('--latest_ckpt_path', type=str, default=None,
-                             help='Path to a checkpoint to resume from. If omitted or missing, training starts from scratch.')
-    checkpoints.add_argument('--save_ckpt_every', type=int, default=2000,
-                             help='Save checkpoints every N steps. Default is 2000.')
+    checkpoints.add_argument('--ckpt_save_path', type=str, default='/kaggle/working/trained_weights/megadepth')
+    checkpoints.add_argument('--latest_ckpt_path', type=str, default=None)
+    checkpoints.add_argument('--save_ckpt_every', type=int, default=2000)
 
     optimization = parser.add_argument_group('Optimization')
     optimization.add_argument('--n_steps', type=int, default=160_000, help='Number of training steps.')
     optimization.add_argument('--scheduler_steps', type=int, default=10000, help='Step interval for StepLR.')
     optimization.add_argument('--lr', type=float, default=3e-4, help='Learning rate.')
     optimization.add_argument('--gamma_steplr', type=float, default=0.5, help='Gamma value for StepLR.')
-    optimization.add_argument('--training_res', type=parse_training_res, default=(800, 608),
-                              help='Training resolution as width,height. Default is 800,608.')
+    optimization.add_argument('--training_res', type=parse_training_res, default=(800, 608))
+    optimization.add_argument('--amp', action='store_true', help='Enable Automatic Mixed Precision (FP16).')
 
     losses = parser.add_argument_group('Losses')
     losses.add_argument('--use_coord_loss', action='store_true', help='Enable coordinate loss.')
 
     args = parser.parse_args()
-    if args.n_steps <= 0:
-        parser.error('--n_steps must be a positive integer.')
-    if args.scheduler_steps <= 0:
-        parser.error('--scheduler_steps must be a positive integer.')
-    if args.save_ckpt_every <= 0:
-        parser.error('--save_ckpt_every must be a positive integer.')
-    if not args.use_megadepth and not args.use_coco:
-        parser.error('No training dataset enabled. Pass --use_megadepth and/or --use_coco.')
-    if args.use_megadepth and args.megadepth_batch_size <= 0:
-        parser.error('--megadepth_batch_size must be positive when --use_megadepth is enabled.')
-    if args.use_coco and args.coco_batch_size <= 0:
-        parser.error('--coco_batch_size must be positive when --use_coco is enabled.')
-    if args.platform == 'Kaggle' and not 0 <= args.kaggle_host_id < len(KAGGLE_HOST_NAMES):
-        parser.error(f'--kaggle_host_id must be between 0 and {len(KAGGLE_HOST_NAMES) - 1}.')
-
+    
     os.environ['CUDA_VISIBLE_DEVICES'] = args.device_num
-
     return TrainerConfig(**vars(args))
 
 config = parse_arguments()
@@ -192,12 +177,16 @@ class Trainer:
         print(f'MegaDepth: {self.use_megadepth}-{self.megadepth_batch_size}')
         print(f'COCO20k: {self.use_coco}-{self.coco_batch_size}')
         print(f'Coordinate loss: {self.use_coord_loss}')
+        print(f'AMP enabled: {self.config.amp}')
+        print(f'Workers: {self.config.num_workers}')
 
     def setup_device(self):
-        self.dev = torch.device ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f'Training device: {self.dev}')
         if torch.cuda.is_available():
             print(f'GPU: {torch.cuda.get_device_name(0)}')
+            
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.config.amp)
 
     def setup_models(self):
         self.net = LiftFeatSPModel(modified_fusion_featureboost_config).to(self.dev)
@@ -241,12 +230,22 @@ class Trainer:
                 MegaDepthDataset(root_dirs=trainval_data_source, npz_path=path)
                 for path in tqdm.tqdm(npz_paths, desc="[MegaDepth] Loading metadata")
             ])
+            
+            # Integrated multiprocessing and pinned memory constraints
+            dataloader_kwargs = {
+                'batch_size': self.megadepth_batch_size,
+                'shuffle': True,
+                'drop_last': True
+            }
+            if self.config.num_workers > 0 and torch.cuda.is_available():
+                dataloader_kwargs.update({
+                    'num_workers': self.config.num_workers,
+                    'pin_memory': True,
+                    'persistent_workers': True,
+                    'prefetch_factor': 2
+                })
 
-            self.megadepth_dataloader = DataLoader(
-                megadepth_dataset,
-                batch_size=self.megadepth_batch_size,
-                shuffle=True
-            )
+            self.megadepth_dataloader = DataLoader(megadepth_dataset, **dataloader_kwargs)
             self.megadepth_data_iter = iter(self.megadepth_dataloader)
 
     def setup_logging(self):
@@ -266,6 +265,8 @@ class Trainer:
             self.scheduler.load_state_dict(checkpoint['scheduler'])
             move_optimizer_state_to_device(self.opt, self.dev)
             self.current_step = checkpoint.get('step', checkpoint.get('current step', 0))
+            if self.config.amp and 'scaler' in checkpoint:
+                self.scaler.load_state_dict(checkpoint['scaler'])
             print(f'Resuming from step {self.current_step}.')
         else:
             if ckpt_path is None:
@@ -277,7 +278,6 @@ class Trainer:
     def generate_train_data(self):
         imgs1_t,imgs2_t=[],[]
         imgs1_np,imgs2_np=[],[]
-        # norms0,norms1=[],[]
         positives_coarse=[]
         
         if self.use_coco:
@@ -308,7 +308,8 @@ class Trainer:
 
             for k in megadepth_data.keys():
                 if isinstance(megadepth_data[k], torch.Tensor):
-                    megadepth_data[k] = megadepth_data[k].to(self.dev)
+                    megadepth_data[k] = megadepth_data[k].to(self.dev, non_blocking=True)
+            
             megadepth_imgs1_t, megadepth_imgs2_t = megadepth_data['image0'], megadepth_data['image1']
             megadepth_imgs1_t = megadepth_imgs1_t.mean(1, keepdim=True)
             megadepth_imgs2_t = megadepth_imgs2_t.mean(1, keepdim=True)
@@ -334,166 +335,160 @@ class Trainer:
 
     def train(self):
         self.net.train()
+        failures = 0
 
         with tqdm.tqdm(total=self.steps, initial=self.current_step) as pbar:
-            for i in range(self.current_step, self.steps):
-                # import pdb;pdb.set_trace()
-                temp =self.generate_train_data()
-                if temp is None: continue
+            # Replaced for loop with while loop to count only successful completion steps
+            while self.current_step < self.steps:
+                temp = self.generate_train_data()
+                if temp is None:
+                    failures += 1
+                    if failures > self.config.max_load_failures:
+                        raise RuntimeError(f"Data loading failed {failures} times in a row.")
+                    continue
+                
                 imgs1_t, imgs2_t, imgs1_np, imgs2_np, positives_coarse = temp
 
-                #Check if batch is corrupted with too few correspondences
                 is_corrupted = False
                 for p in positives_coarse:
                     if len(p) < 30:
                         is_corrupted = True
 
                 if is_corrupted:
+                    failures += 1
+                    if failures > self.config.max_load_failures:
+                        raise RuntimeError(f"Corrupted batches received {failures} times in a row.")
                     continue
+                
+                failures = 0  # Reset on successful batch load
+                
+                # --- Teacher Extraction (No Autograd Tracking) ---
+                with torch.no_grad():
+                    DA_normals1, DA_normals2 = [], []
+                    
+                    for b in range(len(imgs1_np)):
+                        _, megadepth_norm1 = self.depth_net.extract(imgs1_np[b])
+                        _, megadepth_norm2 = self.depth_net.extract(imgs2_np[b])
+                        DA_normals1.append(megadepth_norm1)
+                        DA_normals2.append(megadepth_norm2)
+                        
+                    alike_kpts1 = self.alike_net.extract_alike_kpts_from_tensor(imgs1_t)
+                    alike_kpts2 = self.alike_net.extract_alike_kpts_from_tensor(imgs2_t)
 
-                # import pdb;pdb.set_trace()
-                #Forward pass
-                # start=time.perf_counter()
-                feats1,kpts1,normals1,normals_feat1 = self.net.forward1(imgs1_t)
-                feats2,kpts2,normals2,normals_feat2 = self.net.forward1(imgs2_t)
-                
-                coordinates,fb_coordinates=[],[]
-                alike_kpts1,alike_kpts2=[],[]
-                DA_normals1,DA_normals2=[],[]
-                
-                # import pdb;pdb.set_trace()
-                
-                fb_feats1,fb_feats2=[],[]
-                for b in range(feats1.shape[0]):
-                    feat1=feats1[b].permute(1,2,0).reshape(-1,feats1.shape[1])
-                    feat2=feats2[b].permute(1,2,0).reshape(-1,feats2.shape[1])
+                # --- Student Forward Pass w/ AMP context ---
+                with torch.cuda.amp.autocast(enabled=self.config.amp):
+                    feats1, kpts1, normals1, normals_feat1 = self.net.forward1(imgs1_t)
+                    feats2, kpts2, normals2, normals_feat2 = self.net.forward1(imgs2_t)
                     
-                    coordinate=self.net.fine_matcher(torch.cat([feat1,feat2],dim=-1))
-                    coordinates.append(coordinate)
-                    
-                    fb_feat1=self.net.forward2(feats1[b].unsqueeze(0),normals_feat1[b].unsqueeze(0))
-                    fb_feat2=self.net.forward2(feats2[b].unsqueeze(0),normals_feat2[b].unsqueeze(0))
-                    
-                    fb_coordinate=self.net.fine_matcher(torch.cat([fb_feat1,fb_feat2],dim=-1))
-                    fb_coordinates.append(fb_coordinate)
-                    
-                    fb_feats1.append(fb_feat1.unsqueeze(0));fb_feats2.append(fb_feat2.unsqueeze(0))
-                    
-                    img1,img2=imgs1_t[b],imgs2_t[b]
-                    img1=img1.permute(1,2,0).expand(-1,-1,3).cpu().numpy() * 255
-                    img2=img2.permute(1,2,0).expand(-1,-1,3).cpu().numpy() * 255
-                    alike_kpt1=torch.tensor(self.alike_net.extract_alike_kpts(img1),device=self.dev)
-                    alike_kpt2=torch.tensor(self.alike_net.extract_alike_kpts(img2),device=self.dev)
-                    alike_kpts1.append(alike_kpt1);alike_kpts2.append(alike_kpt2)
-                
-                # import pdb;pdb.set_trace()
-                for b in range(len(imgs1_np)):
-                    megadepth_depth1,megadepth_norm1=self.depth_net.extract(imgs1_np[b])
-                    megadepth_depth2,megadepth_norm2=self.depth_net.extract(imgs2_np[b])
-                    DA_normals1.append(megadepth_norm1);DA_normals2.append(megadepth_norm2)
-                    
-                # import pdb;pdb.set_trace()
-                fb_feats1=torch.cat(fb_feats1,dim=0)
-                fb_feats2=torch.cat(fb_feats2,dim=0)
-                fb_feats1=fb_feats1.reshape(feats1.shape[0],feats1.shape[2],feats1.shape[3],-1).permute(0,3,1,2)
-                fb_feats2=fb_feats2.reshape(feats2.shape[0],feats2.shape[2],feats2.shape[3],-1).permute(0,3,1,2)
-                
-                coordinates=torch.cat(coordinates,dim=0)
-                coordinates=coordinates.reshape(feats1.shape[0],feats1.shape[2],feats1.shape[3],-1).permute(0,3,1,2)
-                
-                fb_coordinates=torch.cat(fb_coordinates,dim=0)
-                fb_coordinates=fb_coordinates.reshape(feats1.shape[0],feats1.shape[2],feats1.shape[3],-1).permute(0,3,1,2)
-                
-                # end=time.perf_counter()
-                # print(f"forward1 cost {end-start} seconds")
+                    fb_feats1 = self.net.forward2(feats1, normals_feat1).reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0, 3, 1, 2)
+                    fb_feats2 = self.net.forward2(feats2, normals_feat2).reshape(feats2.shape[0], feats2.shape[2], feats2.shape[3], -1).permute(0, 3, 1, 2)
 
-                loss_items = []
+                    if self.use_coord_loss:
+                        feat1 = feats1.permute(0, 2, 3, 1).reshape(-1, feats1.shape[1])
+                        feat2 = feats2.permute(0, 2, 3, 1).reshape(-1, feats2.shape[1])
+                        coordinates = self.net.fine_matcher(torch.cat([feat1, feat2], dim=-1))
+                        coordinates = coordinates.reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0, 3, 1, 2)
 
-                # import pdb;pdb.set_trace()
-                loss_info=self.loss_fn(
-                    feats1,fb_feats1,kpts1,normals1,
-                    feats2,fb_feats2,kpts2,normals2,
-                    positives_coarse,
-                    coordinates,fb_coordinates,
-                    alike_kpts1,alike_kpts2,
-                    DA_normals1,DA_normals2,
-                    self.megadepth_batch_size,self.coco_batch_size)
-                
-                loss_descs,acc_coarse=loss_info['loss_descs'],loss_info['acc_coarse']
-                loss_coordinates,acc_coordinates=loss_info['loss_coordinates'],loss_info['acc_coordinates']
-                loss_fb_descs,acc_fb_coarse=loss_info['loss_fb_descs'],loss_info['acc_fb_coarse']
-                loss_fb_coordinates,acc_fb_coordinates=loss_info['loss_fb_coordinates'],loss_info['acc_fb_coordinates']
-                loss_kpts,acc_kpt=loss_info['loss_kpts'],loss_info['acc_kpt']
-                loss_normals=loss_info['loss_normals']
-                
-                loss_items.append(loss_fb_descs.unsqueeze(0))
-                loss_items.append(loss_kpts.unsqueeze(0))
-                loss_items.append(loss_normals.unsqueeze(0))
-                
-                if self.use_coord_loss:
-                    loss_items.append(loss_fb_coordinates.unsqueeze(0))
+                        fb_f1 = fb_feats1.permute(0, 2, 3, 1).reshape(-1, fb_feats1.shape[1])
+                        fb_f2 = fb_feats2.permute(0, 2, 3, 1).reshape(-1, fb_feats2.shape[1])
+                        fb_coordinates = self.net.fine_matcher(torch.cat([fb_f1, fb_f2], dim=-1))
+                        fb_coordinates = fb_coordinates.reshape(feats1.shape[0], feats1.shape[2], feats1.shape[3], -1).permute(0, 3, 1, 2)
+                    else:
+                        coordinates, fb_coordinates = None, None
 
-                # nb_coarse = len(m1)
-                # nb_coarse = len(fb_m1)
-                loss = torch.cat(loss_items, -1).mean()
+                    loss_info = self.loss_fn(
+                        feats1, fb_feats1, kpts1, normals1,
+                        feats2, fb_feats2, kpts2, normals2,
+                        positives_coarse,
+                        coordinates, fb_coordinates,
+                        alike_kpts1, alike_kpts2,
+                        DA_normals1, DA_normals2,
+                        self.megadepth_batch_size, self.coco_batch_size
+                    )
+                    
+                    loss_items = [loss_info['loss_fb_descs'].unsqueeze(0), loss_info['loss_kpts'].unsqueeze(0), loss_info['loss_normals'].unsqueeze(0)]
+                    if self.use_coord_loss:
+                        loss_items.append(loss_info['loss_fb_coordinates'].unsqueeze(0))
+                    
+                    loss = torch.cat(loss_items, -1).mean()
 
-                # Compute Backward Pass
-                loss.backward()
+                # --- Scaled Backward Pass ---
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.opt)
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), 1.)
-                self.opt.step()
-                self.opt.zero_grad()
+                
+                self.scaler.step(self.opt)
+                self.scaler.update()
+                
+                # set_to_none limits overwriting blocks to zero
+                self.opt.zero_grad(set_to_none=True)
                 self.scheduler.step()
+                
+                self.current_step += 1
+                pbar.update(1)
 
-                # import pdb;pdb.set_trace()
-                if (i+1) % self.save_ckpt_every == 0:
-                    print('saving iter ', i+1)
-                    torch.save({
+                # --- Decoupled Logging / Sync Barriers ---
+                if self.current_step % self.config.log_every == 0 or self.current_step == self.steps:
+                    l_descs, acc_c = loss_info['loss_descs'].item(), loss_info['acc_coarse']
+                    l_fb_descs, acc_fb_c = loss_info['loss_fb_descs'].item(), loss_info['acc_fb_coarse']
+                    l_kpts, acc_k = loss_info['loss_kpts'].item(), loss_info['acc_kpt']
+                    l_norm = loss_info['loss_normals'].item()
+                    
+                    l_coords = loss_info['loss_coordinates'].item() if self.use_coord_loss else 0.0
+                    acc_coords = loss_info['acc_coordinates'] if self.use_coord_loss else 0.0
+                    l_fb_coords = loss_info['loss_fb_coordinates'].item() if self.use_coord_loss else 0.0
+                    acc_fb_coords = loss_info['acc_fb_coordinates'] if self.use_coord_loss else 0.0
+                    
+                    pbar.set_description(
+                        f"Step: {self.current_step}/{self.steps} "
+                        f"Loss: {loss.item():.4f} "
+                        f"L_descs: {l_descs:.3f} Acc_c: {acc_c:.3f} "
+                        f"L_fb_descs: {l_fb_descs:.3f} Acc_fb_c: {acc_fb_c:.3f} "
+                        f"L_kpts: {l_kpts:.3f} Acc_k: {acc_k:.3f} "
+                        f"L_norms: {l_norm:.3f}"
+                    )
+                    
+                    self.writer.add_scalar('Step/current', self.current_step, self.current_step)
+                    self.writer.add_scalar('Loss/total', loss.item(), self.current_step)
+                    self.writer.add_scalar('Loss/descs', l_descs, self.current_step)
+                    self.writer.add_scalar('Loss/fb_descs', l_fb_descs, self.current_step)
+                    self.writer.add_scalar('Loss/kpts', l_kpts, self.current_step)
+                    self.writer.add_scalar('Loss/normals', l_norm, self.current_step)
+                    self.writer.add_scalar('Accuracy/acc_coarse', acc_c, self.current_step)
+                    self.writer.add_scalar('Accuracy/acc_fb_coarse', acc_fb_c, self.current_step)
+                    
+                    if self.use_coord_loss:
+                        self.writer.add_scalar('Loss/coordinates', l_coords, self.current_step)
+                        self.writer.add_scalar('Loss/fb_coordinates', l_fb_coords, self.current_step)
+                        self.writer.add_scalar('Accuracy/acc_coordinates', acc_coords, self.current_step)
+                        self.writer.add_scalar('Accuracy/acc_fb_coordinates', acc_fb_coords, self.current_step)
+
+                # --- Atomic Checkpoint Saves ---
+                if self.current_step % self.save_ckpt_every == 0:
+                    print(f'saving iter {self.current_step}')
+                    
+                    save_dict = {
                         "model": self.net.state_dict(),
                         "optimizer": self.opt.state_dict(),
                         "scheduler": self.scheduler.state_dict(),
-                        "step": i + 1,
-                        "current step": i + 1
-                    }, self.ckpt_save_path + f'/{self.model_name}_{i+1}.pth')
+                        "step": self.current_step,
+                        "current step": self.current_step
+                    }
+                    
+                    if self.config.amp:
+                        save_dict["scaler"] = self.scaler.state_dict()
+                        
+                    tmp_path = self.ckpt_save_path + f'/{self.model_name}_{self.current_step}.pth.tmp'
+                    final_path = self.ckpt_save_path + f'/{self.model_name}_{self.current_step}.pth'
+                    
+                    torch.save(save_dict, tmp_path)
+                    os.replace(tmp_path, final_path)
 
-                pbar.set_description(
-'Step: {}/{} \
-Loss: {:.4f} \
-loss_descs: {:.3f} acc_coarse: {:.3f} \
-loss_coordinates: {:.3f} acc_coordinates: {:.3f} \
-loss_fb_descs: {:.3f} acc_fb_coarse: {:.3f} \
-loss_fb_coordinates: {:.3f} acc_fb_coordinates: {:.3f} \
-loss_kpts: {:.3f} acc_kpts: {:.3f} \
-loss_normals: {:.3f}'.format(
- i+1, self.steps,
-loss.item(),
-loss_descs.item(), acc_coarse,
-loss_coordinates.item(), acc_coordinates,
-loss_fb_descs.item(), acc_fb_coarse,
-loss_fb_coordinates.item(), acc_fb_coordinates,
-loss_kpts.item(), acc_kpt,
-loss_normals.item()) )
-
-                pbar.update(1)
-
-                # Log metrics
-                self.writer.add_scalar('Step/current', i+1, i)
-                self.writer.add_scalar('Loss/total', loss.item(), i)
-                self.writer.add_scalar('Accuracy/acc_coarse', acc_coarse, i)
-                self.writer.add_scalar('Accuracy/acc_coordinates', acc_coordinates, i)
-                self.writer.add_scalar('Accuracy/acc_fb_coarse', acc_fb_coarse, i)
-                self.writer.add_scalar('Accuracy/acc_fb_coordinates', acc_fb_coordinates, i)
-                self.writer.add_scalar('Loss/descs', loss_descs.item(), i)
-                self.writer.add_scalar('Loss/coordinates', loss_coordinates.item(), i)
-                self.writer.add_scalar('Loss/fb_descs', loss_fb_descs.item(), i)
-                self.writer.add_scalar('Loss/fb_coordinates', loss_fb_coordinates.item(), i)
-                self.writer.add_scalar('Loss/kpts', loss_kpts.item(), i)
-                self.writer.add_scalar('Loss/normals', loss_normals.item(), i)
-
+                if self.dry_run:
+                    break
 
 
 if __name__ == '__main__':
-
     setproctitle.setproctitle(config.name)
     trainer = Trainer(config)
-    #The most fun part
     trainer.train()

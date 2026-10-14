@@ -62,10 +62,8 @@ class LiftFeatLoss(nn.Module):
     
     def check_accuracy(self,m1,m2,pts1=None,pts2=None,plot=False):
         with torch.no_grad():
-            #dist_mat = torch.cdist(X,Y)
             dist_mat = m1 @ m2.t()
             nn = torch.argmax(dist_mat, dim=1)
-            #nn = torch.argmin(dist_mat, dim=1)
             correct = nn == torch.arange(len(m1), device = m1.device)
 
             if pts1 is not None and plot:
@@ -107,9 +105,9 @@ class LiftFeatLoss(nn.Module):
         kpts = kpts.permute(1,2,0)
         # get ALike keypoints
         with torch.no_grad():
-            labels = torch.ones((H, W), dtype = torch.long, device = kpts.device) * 64 # -> Default is non-keypoint (bin 64)
+            labels = torch.ones((H, W), dtype = torch.long, device = kpts.device) * 64
             offsets = (((alike_kpts/8) - (alike_kpts/8).long())*8).long()
-            offsets =  offsets[:, 0] + 8*offsets[:, 1]  # Linear IDX
+            offsets =  offsets[:, 0] + 8*offsets[:, 1]
             labels[(alike_kpts[:,1]/8).long(), (alike_kpts[:,0]/8).long()] = offsets
 
         kpts = kpts.view(-1,C)
@@ -118,7 +116,8 @@ class LiftFeatLoss(nn.Module):
         mask = labels < 64
         idxs_pos = mask.nonzero().flatten()
         idxs_neg = (~mask).nonzero().flatten()
-        perm = torch.randperm(idxs_neg.size(0))[:len(idxs_pos)//32]
+        # Ensure random permutation runs on GPU to avoid sync barriers
+        perm = torch.randperm(idxs_neg.size(0), device=idxs_neg.device)[:len(idxs_pos)//32]
         idxs_neg = idxs_neg[perm]
         idxs = torch.cat([idxs_pos, idxs_neg])
 
@@ -174,10 +173,8 @@ class LiftFeatLoss(nn.Module):
     
     
     def normal_loss(self,normal,target_normal):
-        # import pdb;pdb.set_trace()
         normal = normal.permute(1, 2, 0)
         target_normal = target_normal.permute(1,2,0)
-        # loss = F.l1_loss(d_feat, depth_anything_normal_feat)
         dot = torch.cosine_similarity(normal, target_normal, dim=2)
         valid_mask = target_normal[:, :, 0].float() \
                     * (dot.detach() < 0.999).float() \
@@ -190,10 +187,6 @@ class LiftFeatLoss(nn.Module):
     
     def compute_normals_loss(self,normals1,normals2,DA_normals1,DA_normals2,megadepth_batch_size,coco_batch_size):
         loss=[]
-        
-        # import pdb;pdb.set_trace()
-        
-        # only MegaDepth image need depth-normal
         normals1=normals1[coco_batch_size:,...]
         normals2=normals2[coco_batch_size:,...]
         for b in range(len(DA_normals1)):
@@ -214,7 +207,6 @@ class LiftFeatLoss(nn.Module):
             offset_detached = (offset_detached * 8).long()
             label = offset_detached[:, 0] + 8*offset_detached[:, 1]
 
-        #pdb.set_trace()
         coordinate_log = F.log_softmax(coordinate, dim=-1)
 
         predicted = coordinate.max(dim=-1)[1]
@@ -224,7 +216,6 @@ class LiftFeatLoss(nn.Module):
 
         loss = F.nll_loss(coordinate_log, label, reduction = 'none')
         
-        #Weight loss by confidence, giving more emphasis on reliable matches
         conf = conf / conf.sum()
         loss = (loss * conf).sum()
 
@@ -258,22 +249,30 @@ class LiftFeatLoss(nn.Module):
                 DA_normals1,DA_normals2,
                 megadepth_batch_size,coco_batch_size
                 ):
-        # import pdb;pdb.set_trace()
+        
+        # Cast inputs to float32 to prevent instability when mixed-precision is enabled
+        descs1, fb_descs1 = descs1.float(), fb_descs1.float()
+        descs2, fb_descs2 = descs2.float(), fb_descs2.float()
+        kpts1, kpts2 = kpts1.float(), kpts2.float()
+        normals1, normals2 = normals1.float(), normals2.float()
+        
         self.loss_descs,self.acc_coarse,conf_list=self.compute_descriptors_loss(descs1,descs2,pts)
         self.loss_fb_descs,self.acc_fb_coarse,fb_conf_list=self.compute_descriptors_loss(fb_descs1,fb_descs2,pts)
         
-        # start=time.perf_counter()
         self.loss_kpts,self.acc_kpt=self.compute_keypoints_loss(kpts1,kpts2,alike_kpts1,alike_kpts2)
-        # end=time.perf_counter()
-        # print(f"kpts loss cost {end-start} seconds")
         
-        # start=time.perf_counter()
         self.loss_normals=self.compute_normals_loss(normals1,normals2,DA_normals1,DA_normals2,megadepth_batch_size,coco_batch_size)
-        # end=time.perf_counter()
-        # print(f"normal loss cost {end-start} seconds")
         
-        self.loss_coordinates,self.acc_coordinates=self.compute_coordinates_loss(coordinates,pts,conf_list)
-        self.loss_fb_coordinates,self.acc_fb_coordinates=self.compute_coordinates_loss(fb_coordinates,pts,fb_conf_list)
+        # Guard coordinate loss computation to avoid crashing when `--use_coord_loss` is disabled
+        if coordinates is not None:
+            self.loss_coordinates,self.acc_coordinates=self.compute_coordinates_loss(coordinates.float(),pts,conf_list)
+        else:
+            self.loss_coordinates, self.acc_coordinates = torch.tensor(0.0, device=self.dev), 0.0
+
+        if fb_coordinates is not None:
+            self.loss_fb_coordinates,self.acc_fb_coordinates=self.compute_coordinates_loss(fb_coordinates.float(),pts,fb_conf_list)
+        else:
+            self.loss_fb_coordinates, self.acc_fb_coordinates = torch.tensor(0.0, device=self.dev), 0.0
         
         return {
             'loss_descs':self.lam_descs*self.loss_descs,
@@ -288,4 +287,3 @@ class LiftFeatLoss(nn.Module):
             'acc_kpt':self.acc_kpt,
             'loss_normals':self.lam_normals*self.loss_normals,
         }
-

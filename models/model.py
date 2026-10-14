@@ -407,8 +407,9 @@ class LiftFeatSPModel(nn.Module):
     def forward2(self, descs, normals_feat):
         if descs.shape[0] != normals_feat.shape[0] or descs.shape[-2:] != normals_feat.shape[-2:]:
             raise ValueError("Expected descs and normals_feat to have matching batch and spatial dimensions.")
-        normals_v=normals_feat.permute(0,2,3,1).reshape(-1,normals_feat.shape[1])
-        descs_v=descs.permute(0,2,3,1).reshape(-1,descs.shape[1])
+        B = descs.shape[0]
+        normals_v = normals_feat.permute(0, 2, 3, 1).reshape(B, -1, normals_feat.shape[1])
+        descs_v = descs.permute(0, 2, 3, 1).reshape(B, -1, descs.shape[1])
         descs_refine = self.feature_boost(descs_v, normals_v)
         return descs_refine
     

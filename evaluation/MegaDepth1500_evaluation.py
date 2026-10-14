@@ -80,13 +80,13 @@ class MegaDepth1500(Dataset):
         return data
 
 if __name__ == "__main__":
-    weights_dir = os.path.join(os.path.dirname(__file__), '../evaluation/weights')
+    weights_dir = os.path.join(os.path.dirname(__file__), '../evaluation/weights/GFL3')
     all_weight_paths = list(Path(weights_dir).rglob('*.pth'))
     all_results_summary = {}
 
     dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
-    
+
     CURRENT_DIR = os.getcwd()
 
     for weight_path in all_weight_paths:
