@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 def MLP(channels: List[int], do_bn: bool = False) -> nn.Module:
     """Multi-layer perceptron."""
     layers = []
@@ -16,22 +15,11 @@ def MLP(channels: List[int], do_bn: bool = False) -> nn.Module:
             layers.append(nn.ReLU())
     return nn.Sequential(*layers)
 
-
-def MLP_no_ReLU(channels: List[int], do_bn: bool = False) -> nn.Module:
-    """Multi-layer perceptron without hidden ReLU activations."""
-    layers = []
-    for i in range(1, len(channels)):
-        layers.append(nn.Linear(channels[i - 1], channels[i]))
-        if i < len(channels) - 1 and do_bn:
-            layers.append(nn.BatchNorm1d(channels[i]))
-    return nn.Sequential(*layers)
-
-
 class NormalEncoder(nn.Module):
     """Encoding of normal geometry using MLP."""
     def __init__(self, normal_dim: int, feature_dim: int, layers: List[int]) -> None:
         super().__init__()
-        self.encoder = MLP_no_ReLU([normal_dim] + layers + [feature_dim])
+        self.encoder = MLP([normal_dim] + layers + [feature_dim])
 
     def forward(self, normals: torch.Tensor) -> torch.Tensor:
         return self.encoder(normals)
@@ -119,21 +107,6 @@ class AttentionalNN(nn.Module):
             desc = layer(desc)
         return desc
 
-
-class PointwiseProjection(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int):
-        super().__init__()
-        self.proj = nn.Conv1d(input_dim, output_dim, kernel_size=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dim() == 2:
-            x = x.t().unsqueeze(0)
-            x = self.proj(x)
-            return x.squeeze(0).t()
-        # 3D: (B, N, C) -> Conv1d expects (B, C, N)
-        return self.proj(x.transpose(1, 2)).transpose(1, 2)
-
-
 class FeatureProjection(nn.Module):
     """Project concatenated descriptor and normal features back to descriptor space."""
     def __init__(self, input_dim: int, output_dim: int, layers: List[int]):
@@ -147,16 +120,16 @@ class FeatureProjection(nn.Module):
 class FeatureBooster(nn.Module):
     default_config = {
         "modified": False,
-        "descriptor_dim": 128,
+        "descriptor_dim": 64,
         "normal_dim": 192,
-        "normal_encoder": [32, 64, 128],
+        "normal_encoder": [128, 64, 64],
         "descriptor_encoder": [64, 64],
-        "feature_projection": [128, 64, 64],
+        "feature_projection": [128, 256, 128],
         "num_heads": 1,
         "Attentional_layers": 3,
         "last_activation": "relu",
         "l2_normalization": True,
-        "output_dim": 128,
+        "output_dim": 64,
     }
 
     def __init__(self, config):
@@ -173,9 +146,14 @@ class FeatureBooster(nn.Module):
 
     def _init_modified(self) -> None:
         descriptor_dim = self.config["descriptor_dim"]
-        self.normal_proj = PointwiseProjection(self.config["normal_dim"], descriptor_dim)
+        normal_dim = self.config["normal_dim"]
+        self.normal_proj = NormalEncoder(
+            normal_dim,
+            descriptor_dim,
+            self.config["normal_encoder"]
+        )
         self.feat_project = FeatureProjection(
-            input_dim=descriptor_dim * 2,
+            input_dim=descriptor_dim,
             output_dim=descriptor_dim,
             layers=self.config["feature_projection"],
         )
@@ -184,6 +162,7 @@ class FeatureBooster(nn.Module):
             layer_num=self.config["Attentional_layers"],
             num_heads=self.config["num_heads"],
         )
+        print(self.config)
 
     def _init_original(self) -> None:
         descriptor_dim = self.config["descriptor_dim"]
@@ -192,7 +171,10 @@ class FeatureBooster(nn.Module):
             descriptor_dim,
             self.config["normal_encoder"],
         )
-        self.denc = DescriptorEncoder(descriptor_dim, self.config["descriptor_encoder"])
+        self.denc = DescriptorEncoder(
+            descriptor_dim,
+            self.config["descriptor_encoder"]
+        )
         self.attn_proj = AttentionalNN(
             feature_dim=descriptor_dim,
             layer_num=self.config["Attentional_layers"],
@@ -216,10 +198,10 @@ class FeatureBooster(nn.Module):
     3D GFL Ablation Study
     Variations          Fusion                      Attention Head      Residual    In Training
     GFL0 (LiftFeat)     2x MLP                      Single              No                    
-    GFL1                1x1 Conv + Concat + MLP     Single              No          
+    GFL1                EMT + MLP                   Single              No          
     GFL2                2x MLP                      Multi               No          
-    GFL3                2x MLP                      Single              Yes         X
-    GFL4 (Aggregated)   1x1 Conv + Concat + MLP     Multi               Yes         
+    GFL3                2x MLP                      Single              Yes         
+    GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         X
     """
     def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
         if self.modified:
@@ -237,21 +219,21 @@ class FeatureBooster(nn.Module):
             desc = F.normalize(desc, dim=-1)
         return desc
 
-    # def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
-    #     residual = desc
-    #     normals = self.normal_proj(normals)
-    #     desc = torch.cat([desc, normals], dim=-1)
-    #     desc = self.feat_project(desc)
-    #     desc = self.attn_proj(desc)
-    #     return desc
-
-    def _forward_original(
-        self,
-        desc: torch.Tensor,
-        normals: torch.Tensor,
-    ) -> torch.Tensor:
+    def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
         residual = desc
-        desc = self.denc(desc)
-        desc = desc + self.nenc(normals)
+        normals = self.normal_proj(normals)
+        desc = desc * torch.tanh(normals)
+        desc = self.feat_project(desc)
         desc = self.attn_proj(desc)
         return desc + residual
+
+    # def _forward_original(
+    #     self,
+    #     desc: torch.Tensor,
+    #     normals: torch.Tensor,
+    # ) -> torch.Tensor:
+    #     residual = desc
+    #     desc = self.denc(desc)
+    #     desc = desc + self.nenc(normals)
+    #     desc = self.attn_proj(desc)
+    #     return desc + residual
