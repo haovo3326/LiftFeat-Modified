@@ -206,7 +206,7 @@ class COCOAugmentor(nn.Module):
                     'H'       ->   torch.Tensor(3,3): homography matrix 
                     'mask'  ->     torch.Tensor(B, H, W): mask of valid pixels after warp
                     (deformation only)
-                    src, weights, A are parameters from a TPS warp (all torch.Tensors)
+                    src, gfl2, A are parameters from a TPS warp (all torch.Tensors)
 
         """
 
