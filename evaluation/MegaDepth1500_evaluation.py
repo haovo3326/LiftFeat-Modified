@@ -21,6 +21,7 @@ import datetime
 parser=argparse.ArgumentParser(description='MegaDepth dataset evaluation script')
 parser.add_argument('--name',type=str,default='LiftFeat',help='experiment name')
 parser.add_argument('--gpu',type=str,default='0',help='GPU ID')
+parser.add_argument('--num_workers',type=int,default=4,help='number of dataloader worker processes for prefetching')
 args=parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -85,7 +86,18 @@ if __name__ == "__main__":
     all_results_summary = {}
 
     dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
-    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    dataloader_kwargs = {
+        'batch_size': 1,
+        'shuffle': False,
+    }
+    if args.num_workers > 0:
+        dataloader_kwargs.update({
+            'num_workers': args.num_workers,
+            'pin_memory': True,
+            'prefetch_factor': 2,
+            'persistent_workers': True
+        })
+    loader = DataLoader(dataset, **dataloader_kwargs)
 
     CURRENT_DIR = os.getcwd()
 
