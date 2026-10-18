@@ -38,17 +38,52 @@ device = "cuda" if use_cuda else "cpu"
 DATASET_ROOT = os.path.join(os.path.dirname(__file__),'../data/megadepth_test_1500')
 DATASET_JSON = os.path.join(os.path.dirname(__file__),'../data/megadepth_1500.json')
 
+def single_item_collate(batch):
+    return batch[0]
+
+
+class UniqueImagesDataset(Dataset):
+    """
+    Dataset to pre-load each unique image in MegaDepth-1500 exactly once.
+    """
+    def __init__(self, json_file, root_dir):
+        with open(json_file, 'r') as f:
+            data = json.load(f)
+
+        unique = {}
+        for d in data:
+            unique[d['pair_names'][0]] = d['size0_hw']
+            unique[d['pair_names'][1]] = d['size1_hw']
+
+        self.root_dir = root_dir
+        self.items = list(unique.items())
+
+        if not os.path.exists(self.root_dir):
+            raise RuntimeError(
+            f"Dataset {self.root_dir} does not exist! \n \
+              > If you didn't download the dataset, use the downloader tool: python3 -m modules.dataset.download -h")
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, idx):
+        rel_path, (h, w) = self.items[idx]
+        img = cv2.resize(cv2.imread(f"{self.root_dir}/{rel_path}"), (w, h))
+        return rel_path, img
+
+
 class MegaDepth1500(Dataset):
     """
         Streamlined MegaDepth-1500 dataloader. The camera poses & metadata are stored in a formatted json for facilitating 
         the download of the dataset and to keep the setup as simple as possible.
     """
-    def __init__(self, json_file, root_dir):
+    def __init__(self, json_file, root_dir, load_images=True):
         # Load the info & calibration from the JSON
         with open(json_file, 'r') as f:
             self.data = json.load(f)
 
         self.root_dir = root_dir
+        self.load_images = load_images
 
         if not os.path.exists(self.root_dir):
             raise RuntimeError(
@@ -61,18 +96,15 @@ class MegaDepth1500(Dataset):
     def __getitem__(self, idx):
         data = deepcopy(self.data[idx])
 
-        h1, w1 = data['size0_hw']
-        h2, w2 = data['size1_hw']
+        if self.load_images:
+            h1, w1 = data['size0_hw']
+            h2, w2 = data['size1_hw']
 
-        # Here we resize the images to max_dim = 1200, as described in the paper, and adjust the image such that it is divisible by 32
-        # following the protocol of the LoFTR's Dataloader (intrinsics are corrected accordingly). 
-        # For adapting this with different resolution, you would need to re-scale intrinsics below.
-        image0 = cv2.resize(cv2.imread(f"{self.root_dir}/{data['pair_names'][0]}"),(w1, h1))
+            image0 = cv2.resize(cv2.imread(f"{self.root_dir}/{data['pair_names'][0]}"),(w1, h1))
+            image1 = cv2.resize(cv2.imread(f"{self.root_dir}/{data['pair_names'][1]}"),(w2, h2))
 
-        image1 = cv2.resize(cv2.imread(f"{self.root_dir}/{data['pair_names'][1]}"),(w2, h2))
-
-        data['image0'] = torch.tensor(image0.astype(np.float32)/255).permute(2,0,1)
-        data['image1'] = torch.tensor(image1.astype(np.float32)/255).permute(2,0,1)
+            data['image0'] = torch.tensor(image0.astype(np.float32)/255).permute(2,0,1)
+            data['image1'] = torch.tensor(image1.astype(np.float32)/255).permute(2,0,1)
 
         for k,v in data.items():
             if k not in ('dataset_name', 'scene_id', 'pair_id', 'pair_names', 'size0_hw', 'size1_hw', 'image0', 'image1'):
@@ -85,19 +117,25 @@ if __name__ == "__main__":
     all_weight_paths = list(Path(weights_dir).rglob('*.pth'))
     all_results_summary = {}
 
-    dataset = MegaDepth1500(json_file = DATASET_JSON, root_dir = DATASET_ROOT)
-    dataloader_kwargs = {
+    # Phase 1 loader: stream unique images using worker prefetching
+    unique_dataset = UniqueImagesDataset(json_file=DATASET_JSON, root_dir=DATASET_ROOT)
+    unique_loader_kwargs = {
         'batch_size': 1,
         'shuffle': False,
+        'collate_fn': single_item_collate,
     }
     if args.num_workers > 0:
-        dataloader_kwargs.update({
+        unique_loader_kwargs.update({
             'num_workers': args.num_workers,
-            'pin_memory': True,
+            'pin_memory': False,
             'prefetch_factor': 2,
             'persistent_workers': True
         })
-    loader = DataLoader(dataset, **dataloader_kwargs)
+    unique_loader = DataLoader(unique_dataset, **unique_loader_kwargs)
+
+    # Phase 2 loader: metadata-only pair evaluation (instant, zero image I/O)
+    pair_dataset = MegaDepth1500(json_file=DATASET_JSON, root_dir=DATASET_ROOT, load_images=False)
+    pair_loader = DataLoader(pair_dataset, batch_size=1, shuffle=False)
 
     CURRENT_DIR = os.getcwd()
 
@@ -115,22 +153,18 @@ if __name__ == "__main__":
 
         cur_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+        # Phase 1: Pre-extract all unique images into cache
         feature_cache = {}
-        for d in tqdm.tqdm(loader, desc=f"processing {weight_path.name}"):
+        for rel_path, img in tqdm.tqdm(unique_loader, desc=f"caching {weight_path.name}"):
+            feature_cache[rel_path] = liftfeat.extract(img)
+
+        # Phase 2: In-memory evaluation of all 1500 pairs
+        for d in tqdm.tqdm(pair_loader, desc=f"evaluating {weight_path.name}"):
             name0 = d['pair_names'][0][0]
             name1 = d['pair_names'][1][0]
 
-            if name0 in feature_cache:
-                data0 = feature_cache[name0]
-            else:
-                data0 = liftfeat.extract(tensor2bgr(d["image0"]))
-                feature_cache[name0] = data0
-
-            if name1 in feature_cache:
-                data1 = feature_cache[name1]
-            else:
-                data1 = liftfeat.extract(tensor2bgr(d["image1"]))
-                feature_cache[name1] = data1
+            data0 = feature_cache[name0]
+            data1 = feature_cache[name1]
 
             mkpts0, mkpts1 = liftfeat.match_features(data0, data1)
             error_infos = compute_pose_error_from_matches(mkpts0, mkpts1, d)
