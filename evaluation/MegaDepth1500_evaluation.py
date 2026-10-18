@@ -105,6 +105,9 @@ class MegaDepth1500(Dataset):
 
             data['image0'] = torch.tensor(image0.astype(np.float32)/255).permute(2,0,1)
             data['image1'] = torch.tensor(image1.astype(np.float32)/255).permute(2,0,1)
+        else:
+            data.pop('image0', None)
+            data.pop('image1', None)
 
         for k,v in data.items():
             if k not in ('dataset_name', 'scene_id', 'pair_id', 'pair_names', 'size0_hw', 'size1_hw', 'image0', 'image1'):
