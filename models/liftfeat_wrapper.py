@@ -161,11 +161,7 @@ class LiftFeat(nn.Module):
 
         return {"descriptors": descs, "keypoints": kpts, "scores": scores}
 
-    def match_liftfeat(self, img1, img2, min_cossim=-1):
-        # import pdb;pdb.set_trace()
-        data1 = self.extract(img1)
-        data2 = self.extract(img2)
-
+    def match_features(self, data1, data2, min_cossim=-1):
         kpts1, feats1 = data1["keypoints"], data1["descriptors"]
         kpts2, feats2 = data2["keypoints"], data2["descriptors"]
 
@@ -195,3 +191,10 @@ class LiftFeat(nn.Module):
         mkpts1, mkpts2 = mkpts1.cpu().numpy(), mkpts2.cpu().numpy()
 
         return mkpts1, mkpts2
+
+    def match_liftfeat(self, img1, img2, min_cossim=-1):
+        # import pdb;pdb.set_trace()
+        data1 = self.extract(img1)
+        data2 = self.extract(img2)
+        return self.match_features(data1, data2, min_cossim=min_cossim)
+

@@ -115,9 +115,30 @@ if __name__ == "__main__":
 
         cur_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+        feature_cache = {}
         for d in tqdm.tqdm(loader, desc=f"processing {weight_path.name}"):
-            error_infos = compute_pose_error(liftfeat.match_liftfeat,d)
+            name0 = d['pair_names'][0][0]
+            name1 = d['pair_names'][1][0]
+
+            if name0 in feature_cache:
+                data0 = feature_cache[name0]
+            else:
+                data0 = liftfeat.extract(tensor2bgr(d["image0"]))
+                feature_cache[name0] = data0
+
+            if name1 in feature_cache:
+                data1 = feature_cache[name1]
+            else:
+                data1 = liftfeat.extract(tensor2bgr(d["image1"]))
+                feature_cache[name1] = data1
+
+            mkpts0, mkpts1 = liftfeat.match_features(data0, data1)
+            error_infos = compute_pose_error_from_matches(mkpts0, mkpts1, d)
             results.append(error_infos)
+
+        del feature_cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         print(f'\n==={cur_time}==={args.name} ({weight_path.name})===')
         d_err_auc, errors=compute_maa(results)

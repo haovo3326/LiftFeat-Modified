@@ -51,17 +51,14 @@ def estimate_pose(kpts0, kpts1, K0, K1, thresh, conf=0.99999):
 def tensor2bgr(t):
     return (t.cpu()[0].permute(1,2,0).numpy()*255).astype(np.uint8)
 
-def compute_pose_error(match_fn,data):
+def compute_pose_error_from_matches(mkpts0, mkpts1, data):
     result = {"R_err": float("inf"), "t_err": float("inf")}
-    
-    with torch.no_grad():
-        mkpts0,mkpts1=match_fn(tensor2bgr(data["image0"]),tensor2bgr(data["image1"]))
 
     if len(mkpts0) < 5 or len(mkpts1) < 5:
         return result
 
-    mkpts0=mkpts0 * data["scale0"].numpy()
-    mkpts1=mkpts1 * data["scale1"].numpy()
+    mkpts0 = mkpts0 * data["scale0"].numpy()
+    mkpts1 = mkpts1 * data["scale1"].numpy()
 
     K0, K1 = data["K0"][0].numpy(), data["K1"][0].numpy()
     T_0to1 = data["T_0to1"][0].numpy()
@@ -70,7 +67,7 @@ def compute_pose_error(match_fn,data):
     conf = 0.99999
     
     try:
-        ret = estimate_pose(mkpts0,mkpts1,K0,K1,4.0,conf)
+        ret = estimate_pose(mkpts0, mkpts1, K0, K1, 4.0, conf)
     except (RuntimeError, ValueError):
         return result
 
@@ -81,6 +78,12 @@ def compute_pose_error(match_fn,data):
         result['t_err'] = t_err
 
     return result
+
+
+def compute_pose_error(match_fn, data):
+    with torch.no_grad():
+        mkpts0, mkpts1 = match_fn(tensor2bgr(data["image0"]), tensor2bgr(data["image1"]))
+    return compute_pose_error_from_matches(mkpts0, mkpts1, data)
 
 
 def error_auc(errors, thresholds=[5, 10, 20]):
