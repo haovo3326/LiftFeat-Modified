@@ -138,6 +138,8 @@ if __name__ == "__main__":
     pair_loader = DataLoader(pair_dataset, batch_size=1, shuffle=False)
 
     CURRENT_DIR = os.getcwd()
+    summary_file = os.path.join(CURRENT_DIR, 'all_weights_summary.json')
+    evaluated_count = 0
 
     for weight_path in all_weight_paths:
         weight_path_str = str(weight_path)
@@ -181,10 +183,20 @@ if __name__ == "__main__":
             print(f'{s_k}: {s_v*100}')
             
         all_results_summary[weight_path.name] = {k: v * 100 for k, v in d_err_auc.items()}
+        evaluated_count += 1
 
-    # Save the master summary JSON
-    summary_file = os.path.join(CURRENT_DIR, 'all_weights_summary.json')
-    with open(summary_file, 'w') as f:
+        # Overwrite the single summary file every 40 checkpoints (crash-safe atomic write)
+        if evaluated_count % 40 == 0:
+            tmp_file = summary_file + '.tmp'
+            with open(tmp_file, 'w') as f:
+                json.dump(all_results_summary, f, indent=4)
+            os.replace(tmp_file, summary_file)
+            print(f"\n[Progress Saved] Safely updated {summary_file} ({evaluated_count} checkpoints).")
+
+    # Final save to ensure all results are written to the single file
+    tmp_file = summary_file + '.tmp'
+    with open(tmp_file, 'w') as f:
         json.dump(all_results_summary, f, indent=4)
+    os.replace(tmp_file, summary_file)
         
-    print(f"\nEvaluation complete! Summary saved to {summary_file}")
+    print(f"\nEvaluation complete! Final summary saved to {summary_file} (total: {evaluated_count} checkpoints).")
