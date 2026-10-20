@@ -197,8 +197,8 @@ class FeatureBooster(nn.Module):
     """
     3D GFL Ablation Study
     Variations          Fusion                      Attention Head      Residual    In Training
-    GFL0 (LiftFeat)     2x MLP                      Single              No          X          
-    GFL1                EMT + MLP                   Single              No          
+    GFL0 (LiftFeat)     2x MLP                      Single              No                    
+    GFL1                EMT + MLP                   Single              No          X
     GFL2                2x MLP                      Multi               No          
     GFL3                2x MLP                      Single              Yes         
     GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         
@@ -227,13 +227,13 @@ class FeatureBooster(nn.Module):
         desc = self.attn_proj(desc)
         return desc
 
-    def _forward_original(
-        self,
-        desc: torch.Tensor,
-        normals: torch.Tensor,
-    ) -> torch.Tensor:
-        residual = desc
-        desc = self.denc(desc)
-        desc = desc + self.nenc(normals)
-        desc = self.attn_proj(desc)
-        return desc
+    # def _forward_original(
+    #     self,
+    #     desc: torch.Tensor,
+    #     normals: torch.Tensor,
+    # ) -> torch.Tensor:
+    #     residual = desc
+    #     desc = self.denc(desc)
+    #     desc = desc + self.nenc(normals)
+    #     desc = self.attn_proj(desc)
+    #     return desc
