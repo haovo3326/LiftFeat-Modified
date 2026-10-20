@@ -219,21 +219,21 @@ class FeatureBooster(nn.Module):
             desc = F.normalize(desc, dim=-1)
         return desc
 
-    # def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
-    #     residual = desc
-    #     normals = self.normal_proj(normals)
-    #     desc = desc * torch.tanh(normals)
-    #     desc = self.feat_project(desc)
-    #     desc = self.attn_proj(desc)
-    #     return desc + residual
-
-    def _forward_original(
-        self,
-        desc: torch.Tensor,
-        normals: torch.Tensor,
-    ) -> torch.Tensor:
+    def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
         residual = desc
-        desc = self.denc(desc)
-        desc = desc + self.nenc(normals)
+        normals = self.normal_proj(normals)
+        desc = desc * torch.tanh(normals)
+        desc = self.feat_project(desc)
         desc = self.attn_proj(desc)
-        return desc
+        return desc + residual
+
+    # def _forward_original(
+    #     self,
+    #     desc: torch.Tensor,
+    #     normals: torch.Tensor,
+    # ) -> torch.Tensor:
+    #     residual = desc
+    #     desc = self.denc(desc)
+    #     desc = desc + self.nenc(normals)
+    #     desc = self.attn_proj(desc)
+    #     return desc
