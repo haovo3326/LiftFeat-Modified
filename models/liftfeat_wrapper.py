@@ -155,6 +155,8 @@ class LiftFeat(nn.Module):
 
         scores = self.sampler(heatmap, kpts.unsqueeze(0), _H1, _W1)
         scores = scores.squeeze(0).reshape(-1)
+        scores, indices = torch.topk(scores, min(self.top_k, scores.numel()), sorted=True)
+        kpts = kpts[indices]
         descs = self.sampler(descs_map, kpts.unsqueeze(0), _H1, _W1)
         descs = torch.nn.functional.normalize(descs, p=2, dim=1)
         descs = descs.squeeze(0)
@@ -197,4 +199,3 @@ class LiftFeat(nn.Module):
         data1 = self.extract(img1)
         data2 = self.extract(img2)
         return self.match_features(data1, data2, min_cossim=min_cossim)
-
