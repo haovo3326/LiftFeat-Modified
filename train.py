@@ -19,6 +19,7 @@ class TrainerConfig:
     name: str
     platform: str
     kaggle_host_id: int
+    kaggle_host_name: Optional[str]
     use_megadepth: bool
     megadepth_root_path: str
     megadepth_batch_size: int
@@ -68,6 +69,8 @@ def parse_arguments():
                           help='Training platform. Kaggle uses split /kaggle/input dataset shards; Server uses one MegaDepth root.')
     platform.add_argument('--kaggle_host_id', type=int, default=0,
                           help='Kaggle host ID used to select a host/user name for /kaggle/input paths.')
+    platform.add_argument('--kaggle_host_name', '--kaggle_host', dest='kaggle_host_name', type=str, default=None,
+                          help='Kaggle host username (e.g. haovo3326, dngcharles, or any custom account). Overrides --kaggle_host_id if provided.')
 
     megadepth = parser.add_argument_group('MegaDepth dataset')
     megadepth.add_argument('--use_megadepth', action='store_true')
@@ -133,7 +136,18 @@ def move_optimizer_state_to_device(optimizer, device):
 
 def resolve_megadepth_paths(config):
     if config.platform == "Kaggle":
-        host_name = KAGGLE_HOST_NAMES[config.kaggle_host_id]
+        if config.kaggle_host_name:
+            if config.kaggle_host_name.isdigit() and int(config.kaggle_host_name) < len(KAGGLE_HOST_NAMES):
+                host_name = KAGGLE_HOST_NAMES[int(config.kaggle_host_name)]
+            else:
+                host_name = config.kaggle_host_name
+        elif config.kaggle_host_id is not None and 0 <= config.kaggle_host_id < len(KAGGLE_HOST_NAMES):
+            host_name = KAGGLE_HOST_NAMES[config.kaggle_host_id]
+        else:
+            raise ValueError(
+                f"Invalid kaggle_host_id: {config.kaggle_host_id}. "
+                f"Must be between 0 and {len(KAGGLE_HOST_NAMES) - 1}, or provide --kaggle_host_name <username>."
+            )
         train_base_path = f"{config.megadepth_root_path}/{host_name}/megadepth-metadata/train_data/megadepth_indices"
         trainval_data_source = [
             f"{config.megadepth_root_path}/kashiwaba/megadepth-v1-p1/MegaDepth_v1_p1",
