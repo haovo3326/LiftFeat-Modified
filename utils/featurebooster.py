@@ -198,10 +198,10 @@ class FeatureBooster(nn.Module):
     3D GFL Ablation Study
     Variations          Fusion                      Attention Head      Residual    In Training
     GFL0 (LiftFeat)     2x MLP                      Single              No                    
-    GFL1                EMT + MLP                   Single              No          X
+    GFL1                1x MLP                      Single              No          X
     GFL2                2x MLP                      Multi               No          
     GFL3                2x MLP                      Single              Yes         
-    GFL4 (Aggregated)   EMT + MLP                   Multi               Yes         
+    GFL4 (Aggregated)   1x MLP                      Multi               Yes         
     """
     def forward(self, desc: torch.Tensor, *inputs: torch.Tensor) -> torch.Tensor:
         if self.modified:
@@ -219,21 +219,21 @@ class FeatureBooster(nn.Module):
             desc = F.normalize(desc, dim=-1)
         return desc
 
-    def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
-        residual = desc
-        normals = self.normal_proj(normals)
-        desc = desc * torch.tanh(normals)
-        desc = self.feat_project(desc)
-        desc = self.attn_proj(desc)
-        return desc
-
-    # def _forward_original(
-    #     self,
-    #     desc: torch.Tensor,
-    #     normals: torch.Tensor,
-    # ) -> torch.Tensor:
+    # def _forward_modified(self, desc: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     #     residual = desc
-    #     desc = self.denc(desc)
-    #     desc = desc + self.nenc(normals)
+    #     normals = self.normal_proj(normals)
+    #     desc = desc * torch.tanh(normals)
+    #     desc = self.feat_project(desc)
     #     desc = self.attn_proj(desc)
     #     return desc
+
+    def _forward_original(
+        self,
+        desc: torch.Tensor,
+        normals: torch.Tensor,
+    ) -> torch.Tensor:
+        residual = desc
+        # desc = self.denc(desc)
+        desc = desc + self.nenc(normals)
+        desc = self.attn_proj(desc)
+        return desc
