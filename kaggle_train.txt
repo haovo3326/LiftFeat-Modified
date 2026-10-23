@@ -4,7 +4,7 @@
   --use_megadepth --megadepth_root_path /kaggle/input/datasets \
   --ckpt_save_path /kaggle/working/trained_weights/megadepth \
   --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 \
-  --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 1000 \
+  --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000 \
   --amp --num_workers 4
 
 // From checkpoints
@@ -13,6 +13,6 @@
   --use_megadepth --megadepth_root_path /kaggle/input/datasets \
   --ckpt_save_path /kaggle/working/trained_weights/megadepth \
   --megadepth_batch_size 6 --n_steps 160000 --scheduler_steps 30000 \
-  --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 1000 \
+  --lr 3e-4 --gamma_steplr 0.5 --device_num 0 --save_ckpt_every 2000 \
   --latest_ckpt_path /kaggle/working/LiftFeat-Modified/weights/GFL0_M.pth \
   --amp --num_workers 4
